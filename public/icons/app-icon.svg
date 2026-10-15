@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="116" fill="#FFC145"/>
+  <!-- fox face mark -->
+  <g stroke="#1A1530" stroke-width="16" stroke-linejoin="round" stroke-linecap="round">
+    <!-- ears -->
+    <path d="M150 230 C130 180 118 120 128 84 C170 104 214 140 236 172 Z" fill="#F28C38"/>
+    <path d="M362 230 C382 180 394 120 384 84 C342 104 298 140 276 172 Z" fill="#F28C38"/>
+    <path d="M160 206 C150 170 144 134 148 114 C176 130 202 152 218 174 Z" fill="#FF9EC4" stroke="none"/>
+    <path d="M352 206 C362 170 368 134 364 114 C336 130 310 152 294 174 Z" fill="#FF9EC4" stroke="none"/>
+    <!-- head -->
+    <path d="M256 136 C332 136 404 184 404 262 C404 336 360 396 256 396 C152 396 108 336 108 262 C108 184 180 136 256 136 Z" fill="#F28C38"/>
+    <!-- muzzle -->
+    <path d="M256 258 C300 258 330 292 330 330 C330 372 300 396 256 396 C212 396 182 372 182 330 C182 292 212 258 256 258 Z" fill="#FFF1D6"/>
+  </g>
+  <!-- face -->
+  <ellipse cx="206" cy="244" rx="20" ry="24" fill="#1A1530"/>
+  <ellipse cx="306" cy="244" rx="20" ry="24" fill="#1A1530"/>
+  <circle cx="212" cy="236" r="7" fill="#FFFFFF"/>
+  <circle cx="312" cy="236" r="7" fill="#FFFFFF"/>
+  <path d="M238 296 L256 318 L274 296 Z" fill="#1A1530"/>
+  <path d="M256 318 L256 336 M228 346 Q256 368 284 346" stroke="#1A1530" stroke-width="12" fill="none" stroke-linecap="round"/>
+  <circle cx="164" cy="296" r="16" fill="#FF9EC4"/>
+  <circle cx="348" cy="296" r="16" fill="#FF9EC4"/>
+</svg>
