@@ -48,6 +48,10 @@ export function pickNightWatchForm(sessionNumber: number): NightWatchForm {
 
 /** Timing constants (TUNE). Gentle pace is a separate accessibility mode with its own baseline. */
 export const NIGHT_WATCH_TIMING = {
+  /** glows in a full watch (the whole form) */
+  watchGlows: 90,
+  /** glows in a short watch: the first half of the form, for children not yet up to a full one */
+  shortWatchGlows: 45,
   glowIntervalMs: 1500,
   gentleIntervalMs: 2100,
   fadeUpMs: 100,
@@ -61,4 +65,8 @@ export const NIGHT_WATCH_TIMING = {
   invalidAfterResume: 3,
   endPauseMs: 2000,
   cooldownGlows: 15,
+  /** untouched doubles in a row before the companion gives a gentle reminder */
+  nudgeAfterMissedDoubles: 2,
+  /** untouched doubles in a row before the game pauses to ask about carrying on */
+  checkInAfterMissedDoubles: 4,
 } as const;

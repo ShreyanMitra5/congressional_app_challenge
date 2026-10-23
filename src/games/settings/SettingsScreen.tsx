@@ -241,6 +241,9 @@ export function SettingsScreen() {
           <Row label="Gentle pace" hint="Night Watch only. A slower watch with its own baseline.">
             <Toggle on={settings.gentlePace} onChange={(v) => update({ gentlePace: v })} label="Gentle pace" />
           </Row>
+          <Row label="Short watch" hint="Night Watch only. Half the length (45 glows) for a child who can't yet sit a full one.">
+            <Toggle on={settings.shortWatch} onChange={(v) => update({ shortWatch: v })} label="Short watch" />
+          </Row>
 
           <div style={{ height: 14 }} />
           <div style={{ padding: "0 6px 6px" }}>

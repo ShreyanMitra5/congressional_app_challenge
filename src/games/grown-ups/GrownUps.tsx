@@ -479,6 +479,17 @@ function SessionRow({
             <Chip tone="cream" tilt={0} style={smallChip}>Stopped early</Chip>
           )}
           {excluded && <Chip tone="pink" tilt={0} style={smallChip}>Not counted in trends</Chip>}
+          {session.game === "nightWatch" && session.shortWatch && (
+            <Chip tone="cream" tilt={0} style={smallChip}>Short watch</Chip>
+          )}
+          {session.game === "nightWatch" && session.gentlePace && (
+            <Chip tone="cream" tilt={0} style={smallChip}>Gentle pace</Chip>
+          )}
+          {(session.nudges ?? 0) > 0 && (
+            <Chip tone="cream" tilt={0} style={smallChip}>
+              {session.checkedIn ? "Paused to check in" : "Needed a nudge"}
+            </Chip>
+          )}
         </div>
         {excluded && "exclusionReason" in session && session.exclusionReason && (
           <div className="t-note" style={{ marginTop: 8, color: inkSoft }}>{session.exclusionReason}</div>

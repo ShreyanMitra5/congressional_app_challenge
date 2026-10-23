@@ -1,13 +1,21 @@
 /**
  * Firefly Watch wait lists. Three matched forms: every form uses the same 30
- * wait values (1.0 to 5.0 s, evenly covering the range so medians match
+ * wait values (1.0 to 3.6 s, evenly covering the range so medians match
  * exactly) in a different, seeded order. The same seed always gives the same
  * waits.
+ *
+ * The range was 1.0 to 5.0 s in the first build; it was shortened after
+ * clinician feedback that children with attention difficulties were checking
+ * out between fireflies. The pace is fixed for the whole session (it never
+ * speeds up as the child progresses) so reaction times stay comparable.
  */
 import { mulberry32 } from "@/lib/rng";
 
+export const WATCH_MIN_WAIT_MS = 1000;
+export const WATCH_MAX_WAIT_MS = 3600;
+
 export const WATCH_BASE_WAITS_MS: number[] = Array.from({ length: 30 }, (_, i) =>
-  Math.round(1000 + (i * 4000) / 29),
+  Math.round(WATCH_MIN_WAIT_MS + (i * (WATCH_MAX_WAIT_MS - WATCH_MIN_WAIT_MS)) / 29),
 );
 
 export interface WatchForm {
@@ -37,17 +45,25 @@ export function waitsForSeed(seed: number): number[] {
 }
 
 /** Practice waits are fixed so the two unscored events feel the same every time. */
-export const WATCH_PRACTICE_WAITS_MS = [1800, 2600];
+export const WATCH_PRACTICE_WAITS_MS = [1600, 2400];
 
 export const WATCH_TIMING = {
   scoredEvents: 30,
   practiceEvents: 2,
   timeoutMs: 2500,
   maxFalseStarts: 10,
-  catchGlowMs: 450,
-  oopsBubbleMs: 1200,
+  catchGlowMs: 380,
+  oopsBubbleMs: 950,
   timeoutDriftMs: 800,
-  betweenEventsMs: 350,
+  /** extra time the "floated away" bubble stays after the drift */
+  timeoutHoldMs: 450,
+  betweenEventsMs: 220,
   calibrationTaps: 10,
   calibrationEveryDays: 21,
+  /** after this many fireflies in a row float away, the fox gives a gentle nudge */
+  nudgeAfterTimeouts: 2,
+  /** after this many in a row, the game pauses and asks if the child wants to keep going */
+  checkInAfterTimeouts: 4,
+  /** how long the flying spark takes to reach its bead on the strip */
+  sparkFlyMs: 520,
 } as const;

@@ -28,6 +28,8 @@ export interface Settings {
   highContrast: boolean;
   audioInstructions: boolean;
   gentlePace: boolean;
+  /** Night Watch only: a 45-glow watch instead of 90, for children who cannot yet sit a full one */
+  shortWatch: boolean;
   theme: ThemeId;
   /** last tap-speed calibration, ms between taps, and when it ran */
   calibration: { medianGapMs: number; at: string } | null;
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   highContrast: false,
   audioInstructions: false,
   gentlePace: false,
+  shortWatch: false,
   theme: "night",
   calibration: null,
   sessionCounts: { fireflyWatch: 0, fireflyTrail: 0, nightWatch: 0 },
@@ -88,6 +91,10 @@ export interface FireflyWatchSession {
   events: WatchEvent[];
   pauses: number;
   calibrationGapMs: number | null;
+  /** gentle "still there?" nudges and check-ins the game showed (0 when absent) */
+  nudges?: number;
+  /** true when the game itself paused to ask whether to keep going */
+  checkedIn?: boolean;
 }
 
 export interface TrailTap {
@@ -120,6 +127,8 @@ export interface FireflyTrailSession {
   completed: boolean;
   events: TrailEvent[];
   pauses: number;
+  nudges?: number;
+  checkedIn?: boolean;
 }
 
 export type GlowKind = "single" | "double";
@@ -146,11 +155,15 @@ export interface NightWatchSession {
   formId: string;
   seed: number;
   gentlePace: boolean;
+  /** 45-glow watch (first half of the form) instead of the full 90 */
+  shortWatch?: boolean;
   reducedMotion: boolean;
   completed: boolean;
   events: GlowEvent[];
   pauses: number;
   practiceReplayed: boolean;
+  nudges?: number;
+  checkedIn?: boolean;
 }
 
 export type Session = FireflyWatchSession | FireflyTrailSession | NightWatchSession;

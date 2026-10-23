@@ -279,6 +279,37 @@ html[data-theme="day"] .t-title-lg {
   text-shadow: 0 3px 0 rgba(255, 255, 255, 0.55);
 }
 
+/* A caught firefly flies from the catch spot up to its bead on the progress strip. */
+@keyframes spark-fly {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    opacity: 0.9;
+    transform: translate(var(--fly-dx, 0px), var(--fly-dy, 0px)) scale(0.22);
+  }
+}
+.spark-fly {
+  animation: spark-fly var(--fly-ms, 520ms) cubic-bezier(0.3, 0.6, 0.2, 1) both;
+}
+
+/* A bead on the strip pops once when it lights up. */
+@keyframes bead-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.7);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.bead-pop {
+  animation: bead-pop 360ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
 /* Opacity-only pulse for things that must stay perfectly still under the cursor. */
 @keyframes soft-pulse {
   0%,

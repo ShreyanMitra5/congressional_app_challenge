@@ -20,17 +20,19 @@ import { RewardIcon } from "@/components/art/rewards";
 import type { FoxPose } from "@/components/art/types";
 import { At, Stage } from "@/components/Stage";
 import {
+  BeadStrip,
   Card,
   Chip,
   IconButton,
   LockNote,
   OutlineButton,
   Overlay,
-  Pips,
   PrimaryButton,
   RewardCard,
   SpeechBubble,
   TextButton,
+  beadStripLayout,
+  ink,
   inkSoft,
 } from "@/components/ui";
 import { playChime, speak, startMusic, stopMusic, stopSpeaking, unlockAudio } from "@/lib/audio";
@@ -55,7 +57,7 @@ type Phase =
   | "done"
   | "stoppedEarly";
 
-type PauseKind = null | "user" | "interrupted";
+type PauseKind = null | "user" | "interrupted" | "checkIn";
 
 type TrailKind = TrailEvent["kind"];
 
@@ -64,6 +66,11 @@ interface TrailSpec {
   kind: TrailKind;
   sequence: number[];
   replayed: boolean;
+}
+
+/** Monotonic clock. Only ever read from pointer handlers and timers, never during render. */
+function clockNow(): number {
+  return performance.now();
 }
 
 const PRACTICE_TRAILS = 2;
@@ -80,16 +87,23 @@ const FOX_CATCH_MS = 300;
 const FOX_HOP_MS = 600;
 /** practice comments get a little longer than the usual gap so they can be read */
 const PRACTICE_COMMENT_MS = 1800;
+/** no tap for this long during the child's turn: the fox reminds them what to do */
+const IDLE_NUDGE_MS = 8000;
+/** still nothing after this: the game pauses and asks whether to keep going */
+const IDLE_CHECK_IN_MS = 22000;
+/** one bead per scored trail, centred under the top bar */
+const STRIP = beadStripLayout(SCORED_TRAILS, 14, 5);
+const STRIP_LEFT = (390 - STRIP.width) / 2;
+const DONE_BUTTON = { x: 150, y: 726, w: 200 } as const;
 
 const READY_VOICE =
-  "Watch the fireflies hop from stone to stone. Then tap the same stones in the same order. We'll practice twice first. Those don't count!";
+  "Watch the fireflies hop from stone to stone. Then tap the same stones in the same order, and tap Done when you're finished. We'll practice twice first. Those don't count!";
 
 export function FireflyTrailGame() {
   const router = useRouter();
   const { settings, ready: settingsReady, update, bumpSessionCount } = useSettings();
   const [phase, setPhase] = useState<Phase>("ready");
   const [pause, setPause] = useState<PauseKind>(null);
-  const [trailIndex, setTrailIndex] = useState(-PRACTICE_TRAILS);
   const [scoredDone, setScoredDone] = useState(0);
   const [litStone, setLitStone] = useState<number | null>(null);
   const [tappedStone, setTappedStone] = useState<number | null>(null);
@@ -98,6 +112,8 @@ export function FireflyTrailGame() {
   const [foxPose, setFoxPose] = useState<FoxPose>("idle");
   const [bubble, setBubble] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** how many stones the child has tapped so far this turn (drives the Done button) */
+  const [tapsThisTurn, setTapsThisTurn] = useState(0);
 
   const timers = useRef(new Timers());
   const session = useRef<FireflyTrailSession | null>(null);
@@ -115,9 +131,9 @@ export function FireflyTrailGame() {
   const afterTrailNext = useRef<(() => void) | null>(null);
   const lastEventAt = useRef(0);
   const spoke = useRef(false);
+  const idleTimers = useRef<{ nudge: number | null; checkIn: number | null }>({ nudge: null, checkIn: null });
 
   const reduced = settings.reducedMotion;
-  const isPractice = trailIndex < 0;
   const inPlay = phase === "showing" || phase === "turn" || phase === "afterTrail";
 
   /* ----------------------------- lifecycle ----------------------------- */
@@ -145,7 +161,7 @@ export function FireflyTrailGame() {
     }
   }, [phase, settingsReady, settings.audioInstructions]);
 
-  const now = () => performance.now() - t0.current;
+  const now = () => clockNow() - t0.current;
 
   function delay(ms: number): Promise<void> {
     return new Promise((resolve) => timers.current.set(resolve, ms));
@@ -159,7 +175,7 @@ export function FireflyTrailGame() {
     form.current = f;
     gen.current = makeTrailGenerator(f.seed);
     adaptiveLength.current = TRAIL_TIMING.adaptiveStart;
-    t0.current = performance.now();
+    t0.current = clockNow();
     session.current = {
       id: uuid(),
       game: "fireflyTrail",
@@ -174,6 +190,32 @@ export function FireflyTrailGame() {
     };
     setScoredDone(0);
     startTrail(specFor(-PRACTICE_TRAILS));
+  }
+
+  /* ------------------------------ idle nudges ------------------------------ */
+
+  function clearIdle() {
+    const t = idleTimers.current;
+    if (t.nudge != null) timers.current.clear(t.nudge);
+    if (t.checkIn != null) timers.current.clear(t.checkIn);
+    idleTimers.current = { nudge: null, checkIn: null };
+  }
+
+  /** (Re)arm the "still there?" timers; called whenever the child's turn opens or they tap. */
+  function armIdle() {
+    clearIdle();
+    idleTimers.current.nudge = timers.current.set(() => {
+      if (!turnOpen.current || !session.current) return;
+      session.current.nudges = (session.current.nudges ?? 0) + 1;
+      setBubble(tapCount.current > 0 ? "All done? Tap Done!" : "Tap the stones you saw, then Done.");
+      setFoxPose("earsPerked");
+    }, IDLE_NUDGE_MS);
+    idleTimers.current.checkIn = timers.current.set(() => {
+      if (!turnOpen.current || !session.current) return;
+      session.current.nudges = (session.current.nudges ?? 0) + 1;
+      session.current.checkedIn = true;
+      doPause("checkIn");
+    }, IDLE_CHECK_IN_MS);
   }
 
   /** Build the spec for trail `index`. Adaptive sequences are drawn once, here. */
@@ -200,12 +242,13 @@ export function FireflyTrailGame() {
     tapCount.current = 0;
     turnOpen.current = false;
     afterTrailNext.current = null;
-    setTrailIndex(spec.index);
     setLitStone(null);
     setTappedStone(null);
     setCreature(null);
     setFoxPose("idle");
     setBubble(null);
+    setTapsThisTurn(0);
+    clearIdle();
     setShowKey((k) => k + 1);
     setPhase("showing");
     const token = ++showToken.current;
@@ -236,7 +279,8 @@ export function FireflyTrailGame() {
     setCreature(null);
     turnOpen.current = true;
     setPhase("turn");
-    if (trail.current && trail.current.kind === "practice") setBubble("Your turn! Tap the stones.");
+    if (trail.current && trail.current.kind === "practice") setBubble("Your turn! Tap the stones, then Done.");
+    armIdle();
   }
 
   /* ---------------------------- child's turn --------------------------- */
@@ -246,6 +290,9 @@ export function FireflyTrailGame() {
     const tapMs = e.timeStamp - t0.current;
     taps.current.push({ stone, tapMs });
     const n = ++tapCount.current;
+    setTapsThisTurn(n);
+    if (bubble && trail.current.kind !== "practice") setBubble(null);
+    armIdle();
 
     // The same gentle acknowledgement for every tap, whatever the stone.
     setTappedStone(stone);
@@ -263,9 +310,24 @@ export function FireflyTrailGame() {
     }
   }
 
+  /**
+   * The Done button: the child says the trail is finished. Whatever they
+   * tapped is scored as-is, so a child who remembers three of four stones is
+   * never stuck waiting for a fourth tap they do not believe in.
+   */
+  function onDone() {
+    if (!turnOpen.current || !trail.current || pause) return;
+    if (tapCount.current === 0) return;
+    turnOpen.current = false;
+    finishTrail();
+  }
+
   function finishTrail() {
     const spec = trail.current;
     if (!spec || !session.current) return;
+    clearIdle();
+    if (spec.kind !== "practice") setBubble(null);
+    setFoxPose("idle");
     const seq = spec.sequence;
     const t = taps.current;
     let correctPositions = 0;
@@ -284,7 +346,7 @@ export function FireflyTrailGame() {
     };
     if (spec.replayed) ev.replayed = true;
     session.current.events.push(ev);
-    lastEventAt.current = performance.now();
+    lastEventAt.current = clockNow();
 
     playChime(settings.sound);
     setPhase("afterTrail");
@@ -342,12 +404,13 @@ export function FireflyTrailGame() {
     showToken.current++;
     turnOpen.current = false;
     timers.current.clearAll();
+    idleTimers.current = { nudge: null, checkIn: null };
     setLitStone(null);
     setTappedStone(null);
     setCreature(null);
     setFoxPose("idle");
     setBubble(null);
-    if (session.current) session.current.pauses += 1;
+    if (session.current && kind !== "checkIn") session.current.pauses += 1;
     setPause(kind);
   }
 
@@ -363,7 +426,7 @@ export function FireflyTrailGame() {
       return;
     }
     // The trail in flight is dropped and shown again from the start, same stones.
-    if (trail.current) startTrail(trail.current);
+    if (trail.current) startTrail({ ...trail.current, replayed: true });
   }
 
   async function stopForNow() {
@@ -373,7 +436,7 @@ export function FireflyTrailGame() {
       session.current.endedAt = new Date().toISOString();
       session.current.completed = false;
       try {
-        await finishSession(session.current, REWARD_FOR_GAME.fireflyTrail, performance.now());
+        await finishSession(session.current, REWARD_FOR_GAME.fireflyTrail, clockNow());
       } catch {
         /* storage unavailable: still let the child leave gracefully */
       }
@@ -425,7 +488,7 @@ export function FireflyTrailGame() {
 
   return (
     <Stage>
-      <Scene variant="trail" twinkle={phase === "ready" || phase === "done"} reducedMotion={reduced} />
+      <Scene variant="trail" twinkle reducedMotion={reduced} />
       {!reduced && (
         <style>{`@keyframes ft-arc{0%,100%{transform:translateY(0)}50%{transform:translateY(-16px)}}`}</style>
       )}
@@ -478,16 +541,22 @@ export function FireflyTrailGame() {
           <At x={20} y={56}>
             <IconButton icon="pause" label="Pause" onClick={() => doPause("user")} />
           </At>
-          <At x={0} y={64} w={390} style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
-            <Pips filled={Math.round((scoredDone * 10) / SCORED_TRAILS)} />
+          <At x={STRIP_LEFT} y={64} style={{ pointerEvents: "none" }}>
+            <BeadStrip
+              beads={Array.from({ length: scoredDone }, () => "lit" as const)}
+              total={SCORED_TRAILS}
+              bead={14}
+              gap={5}
+              label="Trails finished"
+            />
           </At>
           <At x={322} y={56}>{soundButton}</At>
 
           <At x={0} y={120} w={390} h={60} style={{ textAlign: "center", padding: "0 24px" }}>
             {phase === "turn" ? (
               <>
-                <div className="t-title">Your turn. Tap the stones.</div>
-                <div className="t-body" style={{ marginTop: 8 }}>Same stones, same order.</div>
+                <div className="t-title">Your turn!</div>
+                <div className="t-body" style={{ marginTop: 8 }}>Tap the stones in order, then Done.</div>
               </>
             ) : (
               <>
@@ -536,11 +605,26 @@ export function FireflyTrailGame() {
           )}
 
           <At x={20} y={620}>
-            <Fox pose={foxPose} width={110} reducedMotion={reduced} />
+            <Fox pose={foxPose} width={110} breathing={phase === "turn"} reducedMotion={reduced} />
           </At>
-          {isPractice && bubble && (
-            <At x={140} y={590}>
-              <SpeechBubble width={230}>{bubble}</SpeechBubble>
+          {bubble && (
+            <At x={140} y={596} style={{ zIndex: 4 }}>
+              <SpeechBubble key={bubble} width={230}>{bubble}</SpeechBubble>
+            </At>
+          )}
+
+          {/* Done: lets the child end a trail with fewer taps than the stones shown. */}
+          {phase === "turn" && (
+            <At x={DONE_BUTTON.x} y={DONE_BUTTON.y} w={DONE_BUTTON.w} className={tapsThisTurn > 0 ? "pop-in" : undefined}>
+              <PrimaryButton
+                width={DONE_BUTTON.w}
+                onClick={onDone}
+                disabled={tapsThisTurn === 0}
+                ariaLabel={tapsThisTurn === 0 ? "Done (tap a stone first)" : "Done"}
+                style={{ height: 60 }}
+              >
+                Done
+              </PrimaryButton>
             </At>
           )}
         </>
@@ -563,6 +647,17 @@ export function FireflyTrailGame() {
           onPrimary={resume}
           secondary="Stop for now"
           onSecondary={() => void stopForNow()}
+        />
+      )}
+      {pause === "checkIn" && (
+        <PauseOverlay
+          title="Still there?"
+          body="No rush. Want to watch that trail again, or rest for now? Either is fine."
+          primary="Show me again"
+          onPrimary={resume}
+          secondary="Rest for now"
+          onSecondary={() => void stopForNow()}
+          testId="check-in"
         />
       )}
 
@@ -637,7 +732,7 @@ export function FireflyTrailGame() {
         <>
           <At x={0} y={200} w={390} style={{ textAlign: "center", padding: "0 30px" }}>
             <div className="t-title-lg">That&apos;s okay.</div>
-            <div className="t-body" style={{ marginTop: 10 }}>Come back whenever.</div>
+            <div className="t-body" style={{ marginTop: 10 }}>Resting is part of it. The stones will be here whenever you are.</div>
           </At>
           <At x={20} y={536}>
             <Fox pose="idle" width={130} breathing reducedMotion={reduced} />
@@ -715,19 +810,28 @@ function StoneButton({
 
 function PauseOverlay({
   title,
+  body,
   primary,
   onPrimary,
   secondary,
   onSecondary,
+  testId,
 }: {
   title: string;
+  body?: string;
   primary: string;
   onPrimary: () => void;
   secondary: string;
   onSecondary: () => void;
+  testId?: string;
 }) {
   return (
     <Overlay title={title}>
+      {body && (
+        <div className="t-body" style={{ color: ink, marginTop: -6 }} data-testid={testId}>
+          {body}
+        </div>
+      )}
       <PrimaryButton onClick={onPrimary} width={270}>{primary}</PrimaryButton>
       <OutlineButton onClick={onSecondary} width={270}>{secondary}</OutlineButton>
     </Overlay>

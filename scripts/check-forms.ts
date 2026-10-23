@@ -3,7 +3,7 @@
  * Run: npx tsx scripts/check-forms.ts
  */
 import { NIGHT_WATCH_FORMS, expandForm } from "../src/lib/forms/nightWatch";
-import { WATCH_FORMS, waitsForSeed } from "../src/lib/forms/fireflyWatch";
+import { WATCH_FORMS, WATCH_MAX_WAIT_MS, WATCH_MIN_WAIT_MS, waitsForSeed } from "../src/lib/forms/fireflyWatch";
 import { STONE_POSITIONS, TRAIL_FORMS } from "../src/lib/forms/fireflyTrail";
 
 let failures = 0;
@@ -57,7 +57,7 @@ const base = waitsForSeed(WATCH_FORMS[0].seed).slice().sort((a, b) => a - b);
 for (const f of WATCH_FORMS) {
   const w = waitsForSeed(f.seed);
   check(w.length === 30, `${f.id}: 30 waits`);
-  check(w.every((x) => x >= 1000 && x <= 5000), `${f.id}: waits within 1-5 s`);
+  check(w.every((x) => x >= WATCH_MIN_WAIT_MS && x <= WATCH_MAX_WAIT_MS), `${f.id}: waits within ${WATCH_MIN_WAIT_MS / 1000}-${WATCH_MAX_WAIT_MS / 1000} s`);
   check(w.slice().sort((a, b) => a - b).join() === base.join(), `${f.id}: matches the shared wait set`);
   const total = w.reduce((a, b) => a + b, 0);
   console.log(`  ${f.id}: first waits ${w.slice(0, 5).join(" ")}… total wait ${(total / 1000).toFixed(1)} s`);

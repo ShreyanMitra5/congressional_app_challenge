@@ -276,6 +276,97 @@ export function IconButton({
 }
 
 /* ------------------------------------------------------------------ */
+/* Bead strip: one bead per event, lit the moment the child earns it   */
+/* ------------------------------------------------------------------ */
+
+export type BeadState = "empty" | "lit" | "dim";
+
+/** Layout numbers for the strip so a game can aim an animation at bead `i`. */
+export function beadStripLayout(total: number, bead: number, gap: number, rows = 1) {
+  const pad = 5;
+  const border = 3;
+  const perRow = Math.ceil(total / rows);
+  const width = (pad + border) * 2 + perRow * bead + (perRow - 1) * gap;
+  const height = (pad + border) * 2 + rows * bead + (rows - 1) * gap;
+  return {
+    width,
+    height,
+    perRow,
+    /** x of bead i's centre, measured from the strip's left edge */
+    beadCenterX: (i: number) => pad + border + (i % perRow) * (bead + gap) + bead / 2,
+    /** y of bead i's centre, measured from the strip's top edge */
+    beadCenterY: (i: number) => pad + border + Math.floor(i / perRow) * (bead + gap) + bead / 2,
+  };
+}
+
+/**
+ * A row of small round beads, one per scored event. A "lit" bead is the
+ * child's light for that event; a "dim" bead means the event went by without
+ * a catch, so the row still moves forward and always ends full.
+ */
+export function BeadStrip({
+  beads,
+  total,
+  color = palette.glow,
+  bead = 8,
+  gap = 3,
+  rows = 1,
+  label = "Progress",
+}: {
+  beads: BeadState[];
+  total: number;
+  color?: string;
+  bead?: number;
+  gap?: number;
+  /** wrap the beads into this many rows (30 beads fit a phone far better as 2 x 15) */
+  rows?: number;
+  label?: string;
+}) {
+  const lit = beads.filter((b) => b === "lit").length;
+  const perRow = Math.ceil(total / rows);
+  return (
+    <div
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-valuenow={beads.length}
+      aria-label={label}
+      data-lit={lit}
+      data-done={beads.length}
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${perRow}, ${bead}px)`,
+        gap,
+        padding: 5,
+        borderRadius: rows > 1 ? 14 : 999,
+        background: navyEdge,
+        border: `3px solid ${palette.dullBorder}`,
+      }}
+    >
+      {Array.from({ length: total }, (_, i) => {
+        const state: BeadState = beads[i] ?? "empty";
+        return (
+          <span
+            key={i}
+            data-bead={state}
+            className={state === "lit" ? "bead-pop" : undefined}
+            style={{
+              width: bead,
+              height: bead,
+              borderRadius: 999,
+              background: state === "lit" ? color : state === "dim" ? palette.soft : navyCard,
+              opacity: state === "dim" ? 0.55 : 1,
+              boxShadow: state === "lit" ? `0 0 ${bead}px ${color}` : "none",
+              flex: "none",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Sticker badge, card, progress bar, bubble                            */
 /* ------------------------------------------------------------------ */
 
@@ -346,7 +437,18 @@ export function Card({
 }
 
 /** Ten chunky progress segments with a shine. Shows how far along, never how well. */
-export function Pips({ filled, total = 10, color = palette.glow }: { filled: number; total?: number; color?: string }) {
+export function Pips({
+  filled,
+  total = 10,
+  color = palette.glow,
+  partial = 0,
+}: {
+  filled: number;
+  total?: number;
+  color?: string;
+  /** 0..1 fill of the pip after the last filled one, so long runs visibly creep forward */
+  partial?: number;
+}) {
   return (
     <div
       role="progressbar"
@@ -365,6 +467,7 @@ export function Pips({ filled, total = 10, color = palette.glow }: { filled: num
     >
       {Array.from({ length: total }, (_, i) => {
         const on = i < filled;
+        const creeping = !on && i === filled && partial > 0;
         return (
           <span
             key={i}
@@ -378,6 +481,21 @@ export function Pips({ filled, total = 10, color = palette.glow }: { filled: num
               transition: "background 200ms ease",
             }}
           >
+            {creeping && (
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: `${Math.round(Math.min(1, partial) * 100)}%`,
+                  background: color,
+                  opacity: 0.85,
+                  transition: "width 300ms linear",
+                }}
+              />
+            )}
             <span
               style={{
                 position: "absolute",

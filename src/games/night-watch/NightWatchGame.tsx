@@ -66,7 +66,7 @@ type Phase =
   | "done"
   | "stoppedEarly";
 
-type PauseKind = null | "user" | "interrupted";
+type PauseKind = null | "user" | "interrupted" | "checkIn";
 
 type RunMode = "practice" | "watch" | "cooldown";
 
@@ -97,6 +97,8 @@ function clockNow(): number {
 
 const T = NIGHT_WATCH_TIMING;
 const PLAY_AREA = { x: 20, y: 190, w: 350, h: 420 } as const;
+/** how long the companion's "still watching?" bubble stays */
+const NUDGE_BUBBLE_MS = 3500;
 const LIGHT_SIZE = 64;
 const COMPANION = { x: 20, y: 620, w: 100 } as const;
 const SIGNAL = { x: 195, y: 734 } as const;
@@ -158,6 +160,7 @@ export function NightWatchGame() {
   const glow = worldGlow[world];
   const reduced = settings.reducedMotion;
   const intervalMs = settings.gentlePace ? T.gentleIntervalMs : T.glowIntervalMs;
+  const watchLength = settings.shortWatch ? T.shortWatchGlows : T.watchGlows;
 
   const [phase, setPhase] = useState<Phase>("ready");
   const [pause, setPause] = useState<PauseKind>(null);
@@ -168,6 +171,8 @@ export function NightWatchGame() {
   const [signalPressed, setSignalPressed] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** the companion's gentle reminder during the watch (never a verdict on any one glow) */
+  const [nudge, setNudge] = useState<string | null>(null);
 
   const timers = useRef(new Timers());
   const session = useRef<NightWatchSession | null>(null);
@@ -183,6 +188,10 @@ export function NightWatchGame() {
   const lastEventAt = useRef(0);
   const saved = useRef(false);
   const intervalRef = useRef(intervalMs);
+  /** doubles in a row that went by with no tap at all since the one before */
+  const missedStreak = useRef(0);
+  const tappedSinceDouble = useRef(false);
+  const nudgeTimer = useRef<number | null>(null);
 
   const line = `${copy.headline} Tap ${copy.button} when one glows twice.`;
   const bubble = `Most ${copy.plural} glow once. Tap ${copy.button} only when one glows twice! We'll practice first.`;
@@ -225,8 +234,11 @@ export function NightWatchGame() {
     const n = bumpSessionCount("nightWatch");
     const form = pickNightWatchForm(n);
     seed.current = form.seed;
-    watchList.current = expandForm(form);
+    watchList.current = expandForm(form).slice(0, watchLength);
     intervalRef.current = settings.gentlePace ? T.gentleIntervalMs : T.glowIntervalMs;
+    missedStreak.current = 0;
+    tappedSinceDouble.current = false;
+    setNudge(null);
     t0.current = clockNow();
     saved.current = false;
     practiceLog.current = [];
@@ -239,6 +251,7 @@ export function NightWatchGame() {
       formId: form.id,
       seed: form.seed,
       gentlePace: settings.gentlePace,
+      shortWatch: settings.shortWatch,
       reducedMotion: settings.reducedMotion,
       completed: false,
       events: [],
@@ -351,9 +364,13 @@ export function NightWatchGame() {
       timers.current.set(() => setLit(false), delayTo(secondAt + T.fadeUpMs + T.holdMs));
     }
 
-    // Practice: the previous glow's hit window closes 300 ms after this one starts.
-    if (r.mode === "practice" && k > 0) {
-      timers.current.set(() => evaluatePractice(k - 1), delayTo(target + T.hitWindowMaxAfterNextMs));
+    // The previous glow's hit window closes 300 ms after this one starts.
+    if (k > 0) {
+      if (r.mode === "practice") {
+        timers.current.set(() => evaluatePractice(k - 1), delayTo(target + T.hitWindowMaxAfterNextMs));
+      } else if (r.mode === "watch") {
+        timers.current.set(() => evaluateWatch(k - 1, token), delayTo(target + T.hitWindowMaxAfterNextMs));
+      }
     }
 
     const slotEnd = target + intervalRef.current;
@@ -400,6 +417,49 @@ export function NightWatchGame() {
     } else {
       goGetReady(startWatch);
     }
+  }
+
+  /**
+   * After a double's window closes during the watch: has the child stopped
+   * responding altogether? Two untouched doubles in a row earn a gentle
+   * reminder from the companion; four earn a pause that asks whether to keep
+   * going. Any tap at all, hit or not, resets the count. The glow list itself
+   * never changes, so the measure is unaffected; nudges are counted in the log.
+   */
+  function evaluateWatch(k: number, token: number) {
+    const r = run.current;
+    const s = session.current;
+    if (!r || !s || r.mode !== "watch" || token !== runToken.current) return;
+    const ev = r.events[k];
+    if (!ev || ev.kind !== "double" || ev.outcome === "invalid") return;
+    if (tappedSinceDouble.current || ev.reactionMs != null || ev.taps.length > 0) {
+      missedStreak.current = 0;
+      tappedSinceDouble.current = false;
+      return;
+    }
+    missedStreak.current += 1;
+    if (missedStreak.current === T.nudgeAfterMissedDoubles) {
+      s.nudges = (s.nudges ?? 0) + 1;
+      showNudge(`Still watching? Tap ${copy.button} when one glows twice.`);
+    } else if (missedStreak.current >= T.checkInAfterMissedDoubles) {
+      s.nudges = (s.nudges ?? 0) + 1;
+      s.checkedIn = true;
+      missedStreak.current = 0;
+      doPause("checkIn");
+    }
+  }
+
+  function showNudge(text: string) {
+    if (nudgeTimer.current != null) timers.current.clear(nudgeTimer.current);
+    setNudge(text);
+    if (!reduced) {
+      setNod(true);
+      window.setTimeout(() => setNod(false), T.nodMs);
+    }
+    nudgeTimer.current = timers.current.set(() => {
+      nudgeTimer.current = null;
+      setNudge(null);
+    }, NUDGE_BUBBLE_MS);
   }
 
   function evaluatePractice(k: number) {
@@ -451,6 +511,8 @@ export function NightWatchGame() {
     const p = phaseRef.current;
     if (!r || r.mode === "cooldown" || r.finalized) return;
     if (p !== "practice" && p !== "watch" && p !== "endPause") return;
+    tappedSinceDouble.current = true;
+    missedStreak.current = 0;
 
     const res = classifyNightWatchTap(tapMs, r.events, intervalRef.current);
     if (!res) return;
@@ -472,9 +534,12 @@ export function NightWatchGame() {
   /* ------------------------------- pausing ------------------------------ */
 
   function doPause(kind: Exclude<PauseKind, null>) {
-    if (!inRun || pause) return;
     const p = phaseRef.current;
+    const running = p === "practice" || p === "watch" || p === "cooldown" || p === "getReady" || p === "endPause";
+    if (!running || pause) return;
     timers.current.clearAll();
+    nudgeTimer.current = null;
+    setNudge(null);
     runToken.current++;
     clearLights();
     pausedIn.current = p;
@@ -485,7 +550,7 @@ export function NightWatchGame() {
       if (inFlight) inFlight.outcome = "invalid";
       r.invalidLeft = T.invalidAfterResume;
     }
-    if (session.current) session.current.pauses += 1;
+    if (session.current && kind !== "checkIn") session.current.pauses += 1;
     setPause(kind);
   }
 
@@ -508,6 +573,8 @@ export function NightWatchGame() {
 
   function resume() {
     setPause(null);
+    missedStreak.current = 0;
+    tappedSinceDouble.current = false;
     const p = pausedIn.current;
     pausedIn.current = null;
     if (p === "getReady") {
@@ -649,7 +716,10 @@ export function NightWatchGame() {
             <IconButton icon="pause" label="Pause" onClick={() => doPause("user")} />
           </At>
           <At x={0} y={64} w={390} style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
-            <Pips filled={Math.min(10, Math.floor(progress / 9))} />
+            <Pips
+              filled={Math.min(10, Math.floor((progress * 10) / watchLength))}
+              partial={((progress * 10) / watchLength) % 1}
+            />
           </At>
           <At x={322} y={56}>{soundButton}</At>
 
@@ -693,6 +763,11 @@ export function NightWatchGame() {
               <SpeechBubble key={hint} width={200}>{hint}</SpeechBubble>
             </At>
           )}
+          {phase === "watch" && nudge && (
+            <At x={170} y={536} style={{ zIndex: 5 }}>
+              <SpeechBubble key={nudge} width={200}>{nudge}</SpeechBubble>
+            </At>
+          )}
 
           {phase === "cooldown" && (
             <At x={282} y={712} w={88} style={{ textAlign: "center" }}>
@@ -724,6 +799,17 @@ export function NightWatchGame() {
       )}
       {pause === "interrupted" && (
         <PauseOverlay title="We paused for you." primary="Keep going" onPrimary={resume} />
+      )}
+      {pause === "checkIn" && (
+        <PauseOverlay
+          title="Still there?"
+          body={`A few ${copy.plural} glowed twice and went by. Want to keep watching, or rest for now? Either is fine.`}
+          primary="Keep watching"
+          onPrimary={resume}
+          secondary="Rest for now"
+          onSecondary={() => void stopForNow()}
+          testId="check-in"
+        />
       )}
 
       {/* ---------------------------- COOLDOWN OFFER ---------------------------- */}
@@ -809,7 +895,9 @@ export function NightWatchGame() {
         <>
           <At x={0} y={200} w={390} style={{ textAlign: "center", padding: "0 30px" }}>
             <div className="t-title-lg">That&apos;s okay.</div>
-            <div className="t-body" style={{ marginTop: 10 }}>Come back whenever.</div>
+            <div className="t-body" style={{ marginTop: 10 }}>
+              Watching is hard work. The {copy.plural} will be here whenever you are.
+            </div>
           </At>
           <At x={20} y={536}>
             <Companion world={world} pose="idle" width={130} breathing reducedMotion={reduced} />
@@ -918,19 +1006,28 @@ function OnceTwiceCard({ world, glow, button }: { world: WorldId; glow: string; 
 
 function PauseOverlay({
   title,
+  body,
   primary,
   onPrimary,
   secondary,
   onSecondary,
+  testId,
 }: {
   title: string;
+  body?: string;
   primary: string;
   onPrimary: () => void;
   secondary?: string;
   onSecondary?: () => void;
+  testId?: string;
 }) {
   return (
     <Overlay title={title}>
+      {body && (
+        <div className="t-body" style={{ color: ink, marginTop: -6 }} data-testid={testId}>
+          {body}
+        </div>
+      )}
       <PrimaryButton onClick={onPrimary} width={270}>{primary}</PrimaryButton>
       {secondary && onSecondary && (
         <OutlineButton onClick={onSecondary} width={270}>{secondary}</OutlineButton>
