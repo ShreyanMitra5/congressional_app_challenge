@@ -1,5 +1,5 @@
 /**
- * Shared palette for the NeuroTrace three-game set.
+ * Shared palette for the Wayglow three-game set.
  * Values come straight from the design document; do not tune at run time.
  */
 export const palette = {

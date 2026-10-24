@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "com.neurotrace.basecamp",
-  appName: "NeuroTrace",
+  appId: "com.wayglow.basecamp",
+  appName: "Wayglow",
   webDir: "out",
   backgroundColor: "#14204A",
   loggingBehavior: "debug",

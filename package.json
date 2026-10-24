@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:ios": "NEUROTRACE_NATIVE=1 next build",
+    "build:ios": "WAYGLOW_NATIVE=1 next build",
     "ios:sync": "npm run build:ios && cap sync ios",
     "ios:open": "cap open ios",
     "ios:run": "npm run ios:sync && cap run ios",

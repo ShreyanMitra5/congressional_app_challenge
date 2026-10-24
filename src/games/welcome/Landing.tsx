@@ -223,9 +223,9 @@ export function Landing() {
   return (
     <div className={styles.page}>
       <header className={`${styles.container} ${styles.header}`}>
-        <Link href="/" className={styles.brand} aria-label="NeuroTrace home">
+        <Link href="/" className={styles.brand} aria-label="Wayglow home">
           <FoxMark size={38} />
-          <span>neurotrace<span className={styles.brandDot}>.</span></span>
+          <span>wayglow<span className={styles.brandDot}>.</span></span>
         </Link>
         <nav aria-label="Main navigation" className={styles.navigation}>
           <a href="#games" className={styles.navExplore}>Meet the games</a>

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { DEFAULT_SETTINGS, type GameId, type Settings } from "@/lib/types";
 
+// Key predates the Wayglow rename; kept so saved settings survive.
 const KEY = "neurotrace.settings.v1";
 
 interface SettingsCtx {
