@@ -729,28 +729,28 @@
     gap: 22px;
   }
 
+  /* One column per card: a fixed-height window onto the game, copy below.
+     The phone mock keeps its full layout box under its transform, so the
+     window must be a fixed height or the card grows to the unscaled mock. */
   .gameCard {
-    display: grid;
-    grid-template-columns: minmax(110px, 0.75fr) minmax(0, 1fr);
+    display: block;
   }
 
   .gamePreview {
-    height: 100%;
-    min-height: 230px;
+    height: 244px;
+    padding-top: 18px;
   }
 
   .gamePreview > div {
-    transform: scale(0.62) rotate(-5deg);
+    transform: scale(0.72) rotate(-4deg);
   }
 
   .trailPreview > div {
-    transform: scale(0.62) rotate(4deg);
+    transform: scale(0.72) rotate(3deg);
   }
 
   .gameCopy {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+    padding: 20px 22px 24px;
   }
 
   .gameCopy h3 {
@@ -815,17 +815,8 @@
     width: 100%;
   }
 
-  .gameCard {
-    grid-template-columns: 1fr;
-  }
-
   .gamePreview {
-    height: 200px;
-    min-height: 0;
-  }
-
-  .gameCopy {
-    padding: 22px;
+    height: 228px;
   }
 
   .startBanner,
