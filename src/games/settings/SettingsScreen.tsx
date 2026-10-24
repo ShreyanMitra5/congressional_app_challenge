@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Skin } from "@/components/art/skins";
 import { SKIN_NAMES } from "@/components/art/types";
-import { At, Stage } from "@/components/Stage";
+import { Stage } from "@/components/Stage";
 import { amberEdge, Card, Chip, IconButton, ink, inkSoft, LockNote, OutlineButton, tan, tanEdge } from "@/components/ui";
 import { speak, stopSpeaking, unlockAudio } from "@/lib/audio";
 import { deleteAllData } from "@/lib/db";
@@ -12,6 +12,7 @@ import { useSettings } from "@/lib/settings";
 import { palette } from "@/lib/theme";
 import type { TextSize, ThemeId, WorldId } from "@/lib/types";
 import { Scene } from "@/components/art/scenes";
+import styles from "./SettingsScreen.module.css";
 
 const WORLD_NAMES: Record<WorldId, string> = {
   forest: "Forest Friends",
@@ -19,27 +20,16 @@ const WORLD_NAMES: Record<WorldId, string> = {
   neon: "Neon Arcade",
 };
 
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Row({ label, hint, children, stacked = false }: { label: string; hint?: string; children: React.ReactNode; stacked?: boolean }) {
   return (
-    <Card
-      padding="12px 16px"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        minHeight: 72,
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div className="t-body-cream" style={{ color: ink }}>{label}</div>
-        {hint && (
-          <div className="t-note" style={{ marginTop: 2, color: inkSoft }}>
-            {hint}
-          </div>
-        )}
+    <Card padding="18px" style={{ minWidth: 0 }}>
+      <div className={`${styles.row} ${stacked ? styles.stacked : ""}`}>
+        <div className={styles.rowCopy}>
+          <div className="t-body-cream" style={{ color: ink, lineHeight: 1.3 }}>{label}</div>
+          {hint && <div className={`t-note ${styles.hint}`}>{hint}</div>}
+        </div>
+        <div className={styles.rowControl}>{children}</div>
       </div>
-      <div style={{ flex: "none" }}>{children}</div>
     </Card>
   );
 }
@@ -101,10 +91,10 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
 }
 
 /** A cream pill group; the chosen option is a solid glow pill with an amber edge. */
-function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string; accessibleLabel?: string }[]; onChange: (v: T) => void; label: string }) {
   return (
     <div
-      role="radiogroup"
+      role="group"
       aria-label={label}
       style={{
         display: "flex",
@@ -122,13 +112,13 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
           <button
             key={o.id}
             type="button"
-            role="radio"
-            aria-checked={selected}
+            aria-pressed={selected}
+            aria-label={o.accessibleLabel}
             onClick={() => onChange(o.id)}
             style={{
               minWidth: 44,
-              height: 36,
-              padding: "0 12px",
+              minHeight: 44,
+              padding: "10px 14px",
               borderRadius: 999,
               border: "none",
               background: selected ? palette.glow : "transparent",
@@ -138,7 +128,7 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
               fontFamily: "var(--font-title)",
               fontWeight: 700,
               fontSize: "calc(15px * var(--text-scale))",
-              lineHeight: 1,
+              lineHeight: 1.2,
               transition: "background 120ms ease, box-shadow 120ms ease, transform 120ms ease",
             }}
           >
@@ -155,28 +145,32 @@ export function SettingsScreen() {
   const { settings, ready, update, reset } = useSettings();
   const [confirmAll, setConfirmAll] = useState(false);
   const [wiped, setWiped] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
 
   if (!ready) return <Stage>{null}</Stage>;
 
   return (
-    <Stage>
-      <Scene variant="forest" twinkle reducedMotion={settings.reducedMotion} style={{ position: "absolute", inset: 0 }} />
-      <div aria-hidden style={{ position: "absolute", inset: 0, background: settings.theme === "day" ? "rgba(255, 255, 255, 0.18)" : "rgba(10, 18, 48, 0.35)" }} />
-      <At x={20} y={56}>
-        <IconButton icon="back" label="Back to Basecamp" onClick={() => router.push("/basecamp")} />
-      </At>
-      <At x={0} y={64} w={390} style={{ textAlign: "center", pointerEvents: "none" }}>
-        <div className="t-title" style={{ fontSize: "calc(30px * var(--text-scale))" }}>Settings</div>
-      </At>
-
-      <div style={{ position: "absolute", top: 124, left: 0, right: 0, bottom: 0, overflowY: "auto", padding: "0 20px 40px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <Row label="Your catch" hint={SKIN_NAMES[settings.skin]}>
+    <Stage scrollable>
+      <div className={styles.backdrop} aria-hidden>
+        <Scene variant="forest" twinkle reducedMotion={settings.reducedMotion} />
+        <div className={styles.shade} />
+      </div>
+      <main className={styles.content}>
+        <header className={styles.header}>
+          <IconButton icon="back" label="Back to Basecamp" onClick={() => router.push("/basecamp")} />
+          <div>
+            <h1 className={`t-title ${styles.title}`}>Settings</h1>
+            <p className={`t-note ${styles.intro}`}>Make this little world feel right for you.</p>
+          </div>
+        </header>
+        <section className={styles.section} aria-labelledby="settings-look">
+          <h2 id="settings-look" className={styles.sectionTitle}>Your world</h2>
+          <Row label="Your catch" hint={SKIN_NAMES[settings.skin]} stacked>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Skin id={settings.skin} size={44} glow />
               <OutlineButton
-                width={112}
-                style={{ height: 44, fontSize: "calc(18px * var(--text-scale))" }}
+                width="auto"
+                style={{ minWidth: 112, minHeight: 48, height: "auto", padding: "10px 16px", fontSize: "calc(18px * var(--text-scale))", lineHeight: 1.2 }}
                 ariaLabel="Change skin"
                 onClick={() => router.push("/choose-skin?next=/settings")}
               >
@@ -184,7 +178,7 @@ export function SettingsScreen() {
               </OutlineButton>
             </div>
           </Row>
-          <Row label="Time of day" hint={settings.theme === "day" ? "Bright daytime walk." : "Calm storybook night."}>
+          <Row label="Time of day" hint={settings.theme === "day" ? "Bright daytime walk." : "Calm storybook night."} stacked>
             <Segmented<ThemeId>
               label="Time of day"
               value={settings.theme}
@@ -195,37 +189,40 @@ export function SettingsScreen() {
               ]}
             />
           </Row>
-          <Row label="Night Watch world" hint={`${WORLD_NAMES[settings.world]}. Changes game 3's scenery and companion.`}>
+          <Row label="Night Watch world" hint={`${WORLD_NAMES[settings.world]}. Choose your scenery and companion.`} stacked>
             <OutlineButton
-              width={112}
-              style={{ height: 44, fontSize: "calc(18px * var(--text-scale))" }}
+              width="auto"
+              style={{ minWidth: 112, minHeight: 48, height: "auto", padding: "10px 16px", fontSize: "calc(18px * var(--text-scale))", lineHeight: 1.2 }}
               onClick={() => router.push("/choose-world?next=/settings")}
             >
               Change
             </OutlineButton>
           </Row>
+        </section>
+        <section className={styles.section} aria-labelledby="settings-comfort">
+          <h2 id="settings-comfort" className={styles.sectionTitle}>Sound & comfort</h2>
           <Row label="Sound" hint="Chime and music only. Never the glow.">
             <Toggle on={settings.sound} onChange={(v) => update({ sound: v })} label="Sound" />
           </Row>
           <Row label="Reduced motion" hint="Simple cuts instead of fades and drifts.">
             <Toggle on={settings.reducedMotion} onChange={(v) => update({ reducedMotion: v })} label="Reduced motion" />
           </Row>
-          <Row label="Text size">
+          <Row label="Text size" stacked>
             <Segmented<TextSize>
               label="Text size"
               value={settings.textSize}
               onChange={(v) => update({ textSize: v })}
               options={[
-                { id: "normal", label: "A" },
-                { id: "large", label: "A+" },
-                { id: "xlarge", label: "A++" },
+                { id: "normal", label: "A", accessibleLabel: "Normal text" },
+                { id: "large", label: "A+", accessibleLabel: "Large text" },
+                { id: "xlarge", label: "A++", accessibleLabel: "Extra-large text" },
               ]}
             />
           </Row>
           <Row label="High contrast">
             <Toggle on={settings.highContrast} onChange={(v) => update({ highContrast: v })} label="High contrast" />
           </Row>
-          <Row label="Read instructions aloud" hint="Plays the recorded instructions on each Ready screen.">
+          <Row label="Read instructions aloud" hint="Reads the instructions on each Ready screen.">
             <Toggle
               on={settings.audioInstructions}
               onChange={(v) => {
@@ -238,27 +235,33 @@ export function SettingsScreen() {
               label="Read instructions aloud"
             />
           </Row>
-          <Row label="Gentle pace" hint="Night Watch only. A slower watch with its own baseline.">
+        </section>
+        <section className={styles.section} aria-labelledby="settings-watch">
+          <h2 id="settings-watch" className={styles.sectionTitle}>Night Watch</h2>
+          <Row label="Gentle pace" hint="More time between glows for a calmer watch.">
             <Toggle on={settings.gentlePace} onChange={(v) => update({ gentlePace: v })} label="Gentle pace" />
           </Row>
-          <Row label="Short watch" hint="Night Watch only. Half the length (45 glows) for a child who can't yet sit a full one.">
+          <Row label="Short watch" hint="A shorter visit with half as many glows.">
             <Toggle on={settings.shortWatch} onChange={(v) => update({ shortWatch: v })} label="Short watch" />
           </Row>
 
-          <div style={{ height: 14 }} />
-          <div style={{ padding: "0 6px 6px" }}>
-            <Chip tone="pink" tilt={-3}>Your data</Chip>
-          </div>
-          <Row label="Delete one session" hint="Pick it from the grown-ups page.">
-            <OutlineButton width={112} style={{ height: 44, fontSize: "calc(18px * var(--text-scale))" }} onClick={() => router.push("/grown-ups")}>
+        </section>
+        <section className={styles.section} aria-labelledby="settings-data">
+          <h2 id="settings-data" className={styles.sectionTitle}><Chip tone="pink" tilt={-3}>Your data</Chip></h2>
+          <Row label="Delete one session" hint="Pick it from the grown-ups page." stacked>
+            <OutlineButton width="auto" style={{ minWidth: 112, minHeight: 48, height: "auto", padding: "10px 16px", fontSize: "calc(18px * var(--text-scale))", lineHeight: 1.2 }} onClick={() => router.push("/grown-ups")}>
               Open
             </OutlineButton>
           </Row>
-          <Row label="Delete all data" hint={wiped ? "All gone. Fresh start." : "Removes every session and reward on this device."}>
+          <Row label="Delete all data" hint={wiped ? "All gone. Fresh start." : "Removes every session and reward on this device."} stacked>
             <OutlineButton
-              width={confirmAll ? 124 : 112}
+              width="auto"
               style={{
-                height: 44,
+                minWidth: confirmAll ? 124 : 112,
+                minHeight: 48,
+                height: "auto",
+                padding: "10px 16px",
+                lineHeight: 1.2,
                 fontSize: "calc(18px * var(--text-scale))",
                 background: confirmAll ? palette.glow : undefined,
                 borderColor: confirmAll ? palette.glow : undefined,
@@ -270,10 +273,13 @@ export function SettingsScreen() {
                   window.setTimeout(() => setConfirmAll(false), 4000);
                   return;
                 }
+                setDeleteError(false);
                 try {
                   await deleteAllData();
                 } catch {
-                  /* ignore */
+                  setDeleteError(true);
+                  setConfirmAll(false);
+                  return;
                 }
                 reset();
                 setConfirmAll(false);
@@ -283,11 +289,12 @@ export function SettingsScreen() {
               {confirmAll ? "Really?" : "Delete"}
             </OutlineButton>
           </Row>
-          <div style={{ marginTop: 14 }}>
-            <LockNote text="Saved only on this device. Nothing is sent anywhere." />
-          </div>
-        </div>
-      </div>
+          {deleteError && <p className="t-note" role="alert">Your data could not be deleted. Please try again.</p>}
+        </section>
+        <footer className={styles.footer}>
+          <LockNote text="Saved only on this device. Nothing is sent anywhere." />
+        </footer>
+      </main>
     </Stage>
   );
 }

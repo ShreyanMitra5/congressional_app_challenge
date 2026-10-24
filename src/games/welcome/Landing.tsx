@@ -1,23 +1,18 @@
 "use client";
 
-/**
- * The welcome page, laid out the way Duolingo's home page is: a thin nav
- * with the wordmark, a big centred hero with the mascot on one side and one
- * headline plus two stacked buttons on the other, then a few alternating
- * picture-and-two-lines rows with plenty of air, and a short footer.
- */
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Capacitor } from "@capacitor/core";
 import { Fox } from "@/components/art/Fox";
 import { Lynx } from "@/components/art/Lynx";
 import { Otter } from "@/components/art/Otter";
 import { Light, Stone } from "@/components/art/props";
 import { RewardIcon } from "@/components/art/rewards";
 import { Skin } from "@/components/art/skins";
-import { SKIN_IDS } from "@/components/art/types";
-import { BigCircleButton, Icon, ink, inkSoft, OutlineButton, PrimaryButton, tan, tanEdge } from "@/components/ui";
+import { BigCircleButton, Icon } from "@/components/ui";
 import { STONE_POSITIONS } from "@/lib/forms/fireflyTrail";
 import { palette } from "@/lib/theme";
+import styles from "./Landing.module.css";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -42,10 +37,6 @@ function isStandalone(): boolean {
     (navigator as unknown as { standalone?: boolean }).standalone === true
   );
 }
-
-const PAPER = "#FFFFFF";
-const PAPER_2 = "#FFF8E8";
-const RULE = "#EDE6D6";
 
 /* ------------------------------------------------------------------ */
 /* The fox-face wordmark                                                */
@@ -172,22 +163,29 @@ function NightPhone() {
 /* ------------------------------------------------------------------ */
 
 export function Landing() {
-  const router = useRouter();
   const [device, setDevice] = useState<Device>("desktop");
+  const [nativeApp, setNativeApp] = useState<boolean | null>(null);
   const [installed, setInstalled] = useState(false);
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [showHow, setShowHow] = useState(false);
+  const [installPending, setInstallPending] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    // Device and install state only exist in the browser, so they are read once after hydration.
+    // Browser-only state is initialized after hydration.
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNativeApp(Capacitor.isNativePlatform());
     setDevice(detectDevice());
     setInstalled(isStandalone());
+    if (Capacitor.isNativePlatform()) return;
     const onPrompt = (e: Event) => {
       e.preventDefault();
       setDeferred(e as BeforeInstallPromptEvent);
     };
-    const onInstalled = () => setInstalled(true);
+    const onInstalled = () => {
+      setInstalled(true);
+      setShowHow(false);
+    };
     window.addEventListener("beforeinstallprompt", onPrompt);
     window.addEventListener("appinstalled", onInstalled);
     return () => {
@@ -196,212 +194,164 @@ export function Landing() {
     };
   }, []);
 
-  async function onDownload() {
-    if (installed) {
-      router.push("/basecamp");
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (showHow && !dialog.open) dialog.showModal();
+    if (!showHow && dialog.open) dialog.close();
+  }, [showHow]);
+
+  async function onInstall() {
+    if (Capacitor.isNativePlatform()) return;
+    if (!deferred) {
+      setShowHow(true);
       return;
     }
-    if (deferred) {
+    setInstallPending(true);
+    try {
       await deferred.prompt();
       const choice = await deferred.userChoice;
       if (choice.outcome === "accepted") setInstalled(true);
+    } catch {
+      setShowHow(true);
+    } finally {
       setDeferred(null);
-      return;
+      setInstallPending(false);
     }
-    setShowHow(true);
   }
 
   return (
-    <div className="lp" style={{ position: "fixed", inset: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch", background: PAPER, color: ink }}>
-      <style>{`
-        .lp { font-family: var(--font-body); }
-        .lp-col { width: min(1040px, 100% - 48px); margin: 0 auto; }
-        .lp-nav { height: 72px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid ${RULE}; }
-        .lp-hero { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 40px; min-height: calc(100vh - 74px); padding: 40px 0; }
-        .lp-hero-art { display: flex; justify-content: center; }
-        .lp-hero-copy { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 22px; max-width: 480px; justify-self: center; }
-        .lp-h1 { font-family: var(--font-title); font-weight: 700; font-size: clamp(30px, 3.4vw, 40px); line-height: 1.2; color: ${inkSoft}; margin: 0; }
-        .lp-stack { display: flex; flex-direction: column; gap: 12px; width: 330px; max-width: 100%; }
-        .lp-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 48px; padding: 72px 0; }
-        .lp-row:nth-of-type(even) .lp-row-art { order: 2; }
-        .lp-row-art { display: flex; justify-content: center; }
-        .lp-h2 { font-family: var(--font-title); font-weight: 700; font-size: clamp(30px, 3.6vw, 44px); line-height: 1.08; color: ${palette.glow}; color: #E08A00; margin: 0 0 14px; max-width: 14ch; }
-        .lp-p { font-size: 19px; line-height: 1.55; font-weight: 700; color: ${inkSoft}; margin: 0; max-width: 42ch; }
-        .lp-band { background: ${PAPER_2}; border-top: 2px solid ${RULE}; border-bottom: 2px solid ${RULE}; }
-        .lp-cast { display: flex; justify-content: center; align-items: flex-end; gap: 18px; flex-wrap: wrap; padding: 40px 0 8px; }
-        .lp-foot { padding: 36px 0 48px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
-        .lp-skins { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
-        .lp-steps { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 16px; font-weight: 800; line-height: 1.45; color: ${inkSoft}; }
-        .lp-steps li { display: flex; gap: 12px; }
-        .lp-steps b { font-family: var(--font-title); font-weight: 600; flex: none; width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; background: ${palette.glow}; color: ${ink}; font-size: 14px; }
-        @media (max-width: 820px) {
-          .lp-hero { grid-template-columns: 1fr; min-height: 0; padding: 28px 0 36px; gap: 18px; }
-          .lp-hero-fox svg { width: 220px !important; height: auto !important; }
-          .lp-hero-fly { right: -16px !important; top: 0 !important; }
-          .lp-hero-fly svg { width: 64px !important; height: 64px !important; }
-          .lp-hero-spark { left: -10px !important; top: 60px !important; }
-          .lp-hero-spark svg { width: 40px !important; height: 40px !important; }
-          .lp-row, .lp-row:nth-of-type(even) { grid-template-columns: 1fr; gap: 24px; padding: 48px 0; }
-          .lp-row:nth-of-type(even) .lp-row-art { order: 0; }
-          .lp-h2 { max-width: none; }
-        }
-      `}</style>
-
-      {/* nav */}
-      <div className="lp-col">
-        <nav className="lp-nav">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <FoxMark size={40} />
-            <span style={{ fontFamily: "var(--font-title)", fontWeight: 700, fontSize: 26, color: "#E08A00", letterSpacing: "-0.01em" }}>neurotrace</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => router.push("/basecamp")}
-            style={{ background: "transparent", border: "none", fontFamily: "var(--font-title)", fontWeight: 600, fontSize: 16, color: inkSoft, letterSpacing: "0.04em", textTransform: "uppercase", minHeight: 44, padding: "0 6px" }}
-          >
-            Open the app
-          </button>
+    <div className={styles.page}>
+      <header className={`${styles.container} ${styles.header}`}>
+        <Link href="/" className={styles.brand} aria-label="NeuroTrace home">
+          <FoxMark size={38} />
+          <span>neurotrace<span className={styles.brandDot}>.</span></span>
+        </Link>
+        <nav aria-label="Main navigation" className={styles.navigation}>
+          <a href="#games" className={styles.navExplore}>Meet the games</a>
+          <Link href="/basecamp" className={styles.navPlay}>Play now <span aria-hidden>↗</span></Link>
         </nav>
+      </header>
 
-        {/* hero */}
-        <section className="lp-hero">
-          <div className="lp-hero-art">
-            <div style={{ position: "relative" }}>
-              <div className="lp-hero-fox">
-                <Fox pose="celebrating" width={330} breathing />
+      <main>
+        <section className={`${styles.container} ${styles.hero}`} aria-labelledby="welcome-heading">
+          <div className={styles.heroCopy}>
+            <p className={styles.eyebrow}><span aria-hidden>✦</span> Welcome to your little Basecamp</p>
+            <h1 id="welcome-heading" className={styles.headline}>Small adventures.<br /><span>Bright discoveries.</span></h1>
+            <p className={styles.intro}>Three gentle games for curious minds. Explore attention, memory and reaction time with a friendly face by your side.</p>
+            <div className={styles.heroActions}>
+              <Link href="/basecamp" className={styles.primaryAction}>Let’s play <span aria-hidden>→</span></Link>
+              <a href="#games" className={styles.secondaryAction}>Explore the games</a>
+            </div>
+            <p className={styles.quietNote}>Free to play · No account needed · Your own pace</p>
+          </div>
+          <div className={styles.heroArt} aria-hidden="true">
+            <div className={styles.heroCircle} />
+            <div className={styles.heroFox}><Fox pose="celebrating" width={310} breathing /></div>
+            <div className={`${styles.heroFirefly} glow-pulse`}><Skin id="firefly" size={86} glow /></div>
+            <div className={styles.heroSpark}><Skin id="spark" size={48} glow /></div>
+            <div className={styles.welcomeTag}><span>✦</span> A little moment, just for you</div>
+          </div>
+        </section>
+
+        <section id="games" className={styles.gamesSection} aria-labelledby="games-heading">
+          <div className={styles.container}>
+            <div className={styles.sectionHeading}>
+              <div>
+                <p className={styles.eyebrow}>A few minutes of discovery</p>
+                <h2 id="games-heading">Find your next adventure.</h2>
               </div>
-              <div className="glow-pulse lp-hero-fly" style={{ position: "absolute", right: -30, top: 10 }}>
-                <Skin id="firefly" size={92} glow />
-              </div>
-              <div className="lp-hero-spark" style={{ position: "absolute", left: -24, top: 90 }}>
-                <Skin id="spark" size={52} glow />
-              </div>
+              <p>Pick a game, try a practice round, then see where your curiosity takes you.</p>
+            </div>
+            <div className={styles.gameGrid}>
+              <article className={styles.gameCard}>
+                <div className={`${styles.gamePreview} ${styles.watchPreview}`} aria-hidden="true" inert><WatchPhone /></div>
+                <div className={styles.gameCopy}>
+                  <p className={styles.gameType}>Reaction time</p>
+                  <h3>Firefly Watch</h3>
+                  <p>Wait for the little glow, then catch it with a tap.</p>
+                </div>
+              </article>
+              <article className={styles.gameCard}>
+                <div className={`${styles.gamePreview} ${styles.trailPreview}`} aria-hidden="true" inert><TrailPhone /></div>
+                <div className={styles.gameCopy}>
+                  <p className={styles.gameType}>Memory</p>
+                  <h3>Firefly Trail</h3>
+                  <p>Watch the stones light up. Follow the trail from memory.</p>
+                </div>
+              </article>
+              <article className={styles.gameCard}>
+                <div className={`${styles.gamePreview} ${styles.nightPreview}`} aria-hidden="true" inert><NightPhone /></div>
+                <div className={styles.gameCopy}>
+                  <p className={styles.gameType}>Attention</p>
+                  <h3>Night Watch</h3>
+                  <p>Keep an eye on the lanterns and signal when one glows twice.</p>
+                </div>
+              </article>
             </div>
           </div>
-          <div className="lp-hero-copy">
-            <h1 className="lp-h1">The free, calm way for kids to check in on attention, memory and reaction time.</h1>
-            <div className="lp-stack">
-              <PrimaryButton width="100%" onClick={onDownload}>
-                {installed ? "Open the app" : "Get started"}
-              </PrimaryButton>
-              <OutlineButton width="100%" onClick={() => router.push("/basecamp")}>I already have it</OutlineButton>
+        </section>
+
+        <section className={`${styles.container} ${styles.details}`} aria-label="Made for you">
+          <article className={styles.detailCard}>
+            <div className={styles.companions} aria-hidden="true">
+              <Fox pose="idle" width={76} /><Otter pose="waving" width={76} /><Lynx pose="idle" width={76} />
             </div>
-          </div>
-        </section>
-      </div>
-
-      {/* the cast */}
-      <div className="lp-band">
-        <div className="lp-col lp-cast">
-          <Fox pose="idle" width={84} />
-          <Otter pose="waving" width={84} />
-          <Lynx pose="idle" width={84} />
-          <div className="lp-skins" style={{ marginBottom: 14, marginLeft: 12 }}>
-            {SKIN_IDS.map((id) => (
-              <Skin key={id} id={id} size={48} glow />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* rows */}
-      <div className="lp-col">
-        <section className="lp-row">
-          <div className="lp-row-art">
-            <WatchPhone />
-          </div>
-          <div>
-            <h2 className="lp-h2">three games. two minutes each.</h2>
-            <p className="lp-p">Catch a firefly the moment it glows. Follow its trail across the stones. Keep watch over the lanterns. That is the whole check-in.</p>
-          </div>
-        </section>
-
-        <section className="lp-row">
-          <div className="lp-row-art">
-            <TrailPhone />
-          </div>
-          <div>
-            <h2 className="lp-h2">never a score.</h2>
-            <p className="lp-p">No points, ranks or timers. Nothing turns red. The fox cheers for showing up, and a keepsake joins the Basecamp shelf.</p>
-          </div>
-        </section>
-
-        <section className="lp-row">
-          <div className="lp-row-art">
-            <NightPhone />
-          </div>
-          <div>
-            <h2 className="lp-h2">backed by real tests.</h2>
-            <p className="lp-p">Each game is a classic cognitive task in disguise, so the trends grown-ups see mean something. Compared only with your child&apos;s own usual.</p>
-          </div>
-        </section>
-
-        <section className="lp-row">
-          <div className="lp-row-art">
-            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-              <div style={{ width: 150, height: 150, borderRadius: 40, background: palette.glow, display: "grid", placeItems: "center", boxShadow: `0 10px 0 #E08A00` }}>
-                <FoxMark size={118} />
-              </div>
-              <div style={{ display: "grid", gap: 10 }}>
-                <RewardIcon id="lantern" size={56} />
-                <RewardIcon id="stone" size={56} />
-                <RewardIcon id="lanternString" size={56} />
-              </div>
+            <h2>A friendly place to return to.</h2>
+            <p>Choose your companion, make Basecamp your own, and collect a keepsake for showing up. Practice first and take a break whenever you need one.</p>
+          </article>
+          <article className={styles.detailCard}>
+            <div className={styles.keepsakes} aria-hidden="true">
+              <RewardIcon id="lantern" size={70} /><RewardIcon id="stone" size={64} /><RewardIcon id="lanternString" size={76} />
             </div>
-          </div>
-          <div>
-            <h2 className="lp-h2">stays on the phone.</h2>
-            <p className="lp-p">Every session is saved and encrypted on the device it was played on. No account, nothing uploaded, delete any time.</p>
-          </div>
+            <h2>Your progress stays close.</h2>
+            <p>Sessions are saved on this device. Grown-ups can review history and experimental trends, with no account needed. You can delete your data any time.</p>
+          </article>
         </section>
-      </div>
 
-      {/* install */}
-      <div className="lp-band">
-        <div className="lp-col lp-foot">
-          <h2 className="lp-h2" style={{ maxWidth: "none", textAlign: "center", color: ink }}>put it on your phone</h2>
-          <div className="lp-stack">
-            <PrimaryButton width="100%" onClick={onDownload}>
-              {installed ? "Open the app" : "Download the app"}
-            </PrimaryButton>
-            <OutlineButton width="100%" onClick={() => setShowHow(true)}>How it installs</OutlineButton>
+        <section className={`${styles.container} ${styles.startBanner}`} aria-labelledby="start-heading">
+          <div>
+            <p className={styles.eyebrow}>Your Basecamp is ready</p>
+            <h2 id="start-heading">Let a little curiosity lead the way.</h2>
+            <p>{nativeApp === false ? "Start right here in your browser." : "Your next adventure is ready."}</p>
           </div>
-          <span style={{ fontWeight: 800, color: inkSoft, fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <Icon name="lock" size={16} color={inkSoft} /> Free. No account. Nothing leaves the phone.
-          </span>
-        </div>
-      </div>
-      <div className="lp-col" style={{ padding: "22px 0 36px", display: "flex", justifyContent: "center", alignItems: "center", gap: 10 }}>
-        <FoxMark size={26} />
-        <span style={{ fontFamily: "var(--font-title)", fontWeight: 700, fontSize: 16, color: inkSoft }}>neurotrace</span>
-      </div>
-
-      {showHow && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="How to install"
-          className="fade-in"
-          style={{ position: "fixed", inset: 0, background: "rgba(26,21,48,0.55)", display: "grid", placeItems: "center", zIndex: 50, padding: 20 }}
-          onClick={() => setShowHow(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "min(440px, 100%)", background: PAPER, border: `3px solid ${tan}`, borderRadius: 24, boxShadow: `0 6px 0 ${tanEdge}`, padding: "24px 22px 20px", color: ink }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <h3 style={{ fontFamily: "var(--font-title)", fontWeight: 700, fontSize: 24, margin: 0, lineHeight: 1.05 }}>Add NeuroTrace to your phone</h3>
-              <button type="button" aria-label="Close" onClick={() => setShowHow(false)} style={{ width: 40, height: 40, borderRadius: 12, border: `3px solid ${tan}`, background: PAPER, display: "grid", placeItems: "center", flex: "none" }}>
-                <Icon name="close" size={20} />
+          <div className={styles.bannerActions}>
+            <Link href="/basecamp" className={styles.primaryAction}>Let’s play <span aria-hidden>→</span></Link>
+            {nativeApp === false && (!installed ? (
+              <button className={styles.installAction} type="button" onClick={onInstall} disabled={installPending}>
+                {installPending ? "Opening install…" : "Add to home screen"}
               </button>
-            </div>
-            <InstallSteps device={device} />
-            <div style={{ marginTop: 18 }}>
-              <OutlineButton width="100%" onClick={() => setShowHow(false)}>Got it</OutlineButton>
-            </div>
+            ) : <span className={styles.installedNote}>Added to your home screen</span>)}
           </div>
+        </section>
+      </main>
+
+      <footer className={`${styles.container} ${styles.footer}`}>
+        <div className={styles.footerBrand}><FoxMark size={28} /><span>Made for small moments of discovery.</span></div>
+      </footer>
+
+      {nativeApp === false && <dialog
+        ref={dialogRef}
+        className={styles.installDialog}
+        aria-labelledby="install-heading"
+        aria-describedby="install-description"
+        onClose={() => setShowHow(false)}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setShowHow(false);
+        }}
+      >
+        <div className={styles.dialogContent}>
+          <div className={styles.dialogHeader}>
+            <h2 id="install-heading">Keep Basecamp close</h2>
+            <button type="button" aria-label="Close install instructions" onClick={() => setShowHow(false)} className={styles.closeButton}>
+              <Icon name="close" size={20} />
+            </button>
+          </div>
+          <p id="install-description">Add a shortcut to your home screen for an easier way back. You can also keep playing in your browser.</p>
+          <InstallSteps device={device} />
+          <button type="button" className={styles.dialogDone} onClick={() => setShowHow(false)}>Got it</button>
         </div>
-      )}
+      </dialog>}
     </div>
   );
 }
@@ -409,29 +359,24 @@ export function Landing() {
 function InstallSteps({ device }: { device: Device }) {
   const steps: Record<Device, { title: string; lines: string[] }> = {
     ios: {
-      title: "On iPhone or iPad, in Safari",
-      lines: ["Tap the Share button, the square with an arrow.", "Tap “Add to Home Screen”, then Add.", "Open NeuroTrace from the home screen."],
+      title: "In Safari on iPhone or iPad",
+      lines: ["Open the Share menu (the square with an arrow).", "Choose “Add to Home Screen”, then tap Add."],
     },
     android: {
-      title: "On Android, in Chrome",
-      lines: ["Tap “Download the app” and confirm.", "If nothing appears, open the browser menu and choose “Install app”."],
+      title: "In Chrome on Android",
+      lines: ["Open the browser’s three-dot menu.", "Choose “Add to Home screen” or “Install app”, if available, and follow the prompts."],
     },
     desktop: {
-      title: "On this computer",
-      lines: ["Tap “Download the app” and confirm, or use the install icon in the address bar.", "On an iPhone, open this page in Safari, tap Share, then “Add to Home Screen”."],
+      title: "On your computer",
+      lines: ["Look for the install option in your browser’s address bar or menu.", "If your browser doesn’t offer it, bookmark this page to come back any time."],
     },
   };
-  const s = steps[device];
+  const instructions = steps[device];
   return (
-    <div>
-      <div style={{ fontFamily: "var(--font-title)", fontWeight: 600, fontSize: 18, color: ink, marginTop: 18 }}>{s.title}</div>
-      <ol className="lp-steps">
-        {s.lines.map((line, i) => (
-          <li key={i}>
-            <b>{i + 1}</b>
-            <span>{line}</span>
-          </li>
-        ))}
+    <div className={styles.installInstructions}>
+      <h3>{instructions.title}</h3>
+      <ol className={styles.steps}>
+        {instructions.lines.map((line, index) => <li key={index}>{line}</li>)}
       </ol>
     </div>
   );

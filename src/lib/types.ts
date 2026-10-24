@@ -83,6 +83,8 @@ export interface FireflyWatchSession {
   endedAt: string;
   skin: SkinId;
   formId: string;
+  /** Undefined on saved sessions from the earlier 1.0–3.6 s pace. */
+  protocolVersion?: string;
   seed: number;
   reducedMotion: boolean;
   completed: boolean;
@@ -181,6 +183,8 @@ export interface Reliability {
 export interface WatchScore {
   game: "fireflyWatch";
   sessionId: string;
+  /** The wait/position version, used to keep gameplay changes out of the baseline. */
+  protocolVersion?: string;
   at: string;
   medianRtMs: number | null;
   meanRtMs: number | null;

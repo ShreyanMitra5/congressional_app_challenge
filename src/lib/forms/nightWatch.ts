@@ -69,4 +69,6 @@ export const NIGHT_WATCH_TIMING = {
   nudgeAfterMissedDoubles: 2,
   /** untouched doubles in a row before the game pauses to ask about carrying on */
   checkInAfterMissedDoubles: 4,
+  /** An unanswered check-in gently ends this visit instead of waiting indefinitely. */
+  checkInRestMs: 30000,
 } as const;

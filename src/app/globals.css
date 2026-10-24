@@ -45,6 +45,47 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Menus stay readable at their natural size; only the measurement canvas scales. */
+.app-stage {
+  position: fixed;
+  inset: 0;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--night);
+}
+.app-stage__viewport {
+  position: absolute;
+  inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.app-stage--scrollable {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  scroll-padding: 24px;
+}
+.app-stage__flow {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  max-width: 480px;
+  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  margin-inline: auto;
+  background: var(--night);
+}
+@media (min-width: 600px) {
+  .app-stage {
+    background: radial-gradient(ellipse at 50% 25%, var(--hills), var(--ground));
+  }
+  .app-stage__flow {
+    box-shadow: 0 0 80px #0003;
+    border-inline: 1px solid #ffffff12;
+  }
+  .app-stage__canvas {
+    border-radius: 24px;
+    box-shadow: 0 24px 80px #0003;
+  }
+}
+
 body {
   overflow: hidden;
   touch-action: manipulation;
@@ -134,21 +175,21 @@ html[data-reduced-motion="true"] *::after {
 }
 .t-body {
   font-family: var(--font-body);
-  font-weight: 800;
+  font-weight: 600;
   font-size: calc(18px * var(--text-scale));
   line-height: 1.35;
   color: var(--soft);
 }
 .t-body-cream {
   font-family: var(--font-body);
-  font-weight: 800;
+  font-weight: 700;
   font-size: calc(18px * var(--text-scale));
   line-height: 1.35;
   color: var(--cream);
 }
 .t-note {
   font-family: var(--font-body);
-  font-weight: 800;
+  font-weight: 600;
   font-size: calc(13px * var(--text-scale));
   line-height: 1.3;
   color: var(--soft);
@@ -232,9 +273,20 @@ button {
 }
 button:focus-visible,
 a:focus-visible {
-  outline: 3px solid var(--glow);
+  outline: 3px solid #ffc145;
   outline-offset: 3px;
-  border-radius: 999px;
+  box-shadow: 0 0 0 6px #1a1530 !important;
+}
+
+button:disabled { cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-reduced-motion="false"]) *,
+  html:not([data-reduced-motion="false"]) *::before,
+  html:not([data-reduced-motion="false"]) *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 /* Chunky pressable things: the whole button sinks onto its edge when pressed. */

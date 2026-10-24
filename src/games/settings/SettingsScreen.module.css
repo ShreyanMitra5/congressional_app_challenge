@@ -1,0 +1,85 @@
+.backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgba(10, 18, 48, 0.24));
+}
+
+.content {
+  position: relative;
+  padding: 28px 20px 40px;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.title {
+  margin: 5px 0 8px;
+  font-size: calc(30px * var(--text-scale));
+  line-height: 1.15;
+}
+
+.intro {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.sectionTitle {
+  margin: 0 6px;
+  font-family: var(--font-title);
+  font-size: calc(22px * var(--text-scale));
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.rowCopy {
+  min-width: 0;
+  flex: 1;
+}
+
+.hint {
+  margin-top: 5px;
+  color: #5b5478;
+  line-height: 1.5;
+}
+
+.rowControl {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.footer {
+  padding: 0 8px 8px;
+}

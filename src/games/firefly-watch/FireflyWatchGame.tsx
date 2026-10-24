@@ -4,22 +4,22 @@
  * Firefly Watch — the processing-speed game (PVT-style).
  *
  * One stimulus, unpredictable timing, tap as fast as you can. The child feels
- * like they are helping a fox catch fireflies. Every rule, position and line
- * of text in scored events is identical from session to session; only the
- * skin and the seeded wait list change.
+ * like they are helping a fox catch fireflies. Seeded waits and a balanced
+ * sequence of safe positions vary the next glow; each firefly stays still
+ * once it appears, and Catch stays in the same place.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Fox } from "@/components/art/Fox";
 import { Scene } from "@/components/art/scenes";
 import { Skin } from "@/components/art/skins";
 import { RewardIcon } from "@/components/art/rewards";
 import { At, Stage } from "@/components/Stage";
+import { GameReady } from "@/components/GameReady";
 import {
   BeadStrip,
   BigCircleButton,
   Card,
-  Chip,
   IconButton,
   LockNote,
   OutlineButton,
@@ -28,7 +28,6 @@ import {
   PrimaryButton,
   RewardCard,
   SpeechBubble,
-  TextButton,
   beadStripLayout,
   ink,
   inkSoft,
@@ -39,8 +38,11 @@ import {
   WATCH_MAX_WAIT_MS,
   WATCH_MIN_WAIT_MS,
   WATCH_PRACTICE_WAITS_MS,
+  WATCH_PROTOCOL_VERSION,
   WATCH_TIMING,
+  WATCH_POSITIONS,
   pickWatchForm,
+  positionsForSeed,
   waitsForSeed,
 } from "@/lib/forms/fireflyWatch";
 import { mulberry32, uuid } from "@/lib/rng";
@@ -48,6 +50,7 @@ import { REWARD_FOR_GAME, Timers, finishSession, nextPaint, useInterruption } fr
 import { useSettings } from "@/lib/settings";
 import { palette } from "@/lib/theme";
 import type { FireflyWatchSession, WatchEvent } from "@/lib/types";
+import { resolveWatchAttempt, watchResumeIndex, type WatchAttempt } from "@/lib/watchProgress";
 
 type Phase =
   | "ready"
@@ -65,7 +68,6 @@ type Phase =
 
 type PauseKind = null | "user" | "interrupted" | "checkIn";
 
-const SPRITE = { x: 253.5, y: 363 }; // 65% across, 43% down
 const CATCH = { x: 195, y: 734 };
 
 /** The progress strip: one bead per scored firefly, centred under the top bar. */
@@ -75,13 +77,24 @@ const STRIP_TOP = 58;
 /** fox mouth-level, where the "floated away" and nudge bubbles sit (clear of the Catch button) */
 const BUBBLE = { x: 136, y: 534, w: 240 };
 const READY_VOICE =
-  "Catch each firefly the moment it glows. Keep your thumb on Catch. We'll practice twice first. Those don't count!";
+  "Look around for the glow, then tap Catch. Each firefly appears in a new spot. We’ll practice twice first. After practice, every firefly fills a light up top. A catch makes it bright. A firefly that floats away leaves a soft light. You don’t need to catch them all.";
 
 export function FireflyWatchGame() {
   const router = useRouter();
   const { settings, ready: settingsReady, update, bumpSessionCount } = useSettings();
-  const [phase, setPhase] = useState<Phase>("ready");
-  const [pause, setPause] = useState<PauseKind>(null);
+  const [phase, setPhaseState] = useState<Phase>("ready");
+  const phaseRef = useRef<Phase>("ready");
+  function setPhase(next: Phase) {
+    phaseRef.current = next;
+    setPhaseState(next);
+  }
+  const [pause, setPauseState] = useState<PauseKind>(null);
+  const pauseRef = useRef<PauseKind>(null);
+  function setPause(next: PauseKind) {
+    pauseRef.current = next;
+    setPauseState(next);
+  }
+  const [practiceSkip, setPracticeSkip] = useState(false);
   const [eventIndex, setEventIndexState] = useState(-WATCH_TIMING.practiceEvents); // -2, -1 practice
   const idx = useRef(-WATCH_TIMING.practiceEvents);
   const setEventIndex = (n: number) => {
@@ -93,7 +106,10 @@ export function FireflyWatchGame() {
   const calibRef = useRef<number[]>([]);
   const [bonusSpot, setBonusSpot] = useState<{ x: number; y: number } | null>(null);
   const [bonusLeft, setBonusLeft] = useState(0);
+  const [sprite, setSprite] = useState<(typeof WATCH_POSITIONS)[number]>(WATCH_POSITIONS[0]);
   const [saving, setSaving] = useState(false);
+  const finalized = useRef(false);
+  const bonusCatchReady = useRef(false);
   /** one entry per scored event that has resolved: lit for a catch, dim for a float-away */
   const [beads, setBeads] = useState<BeadState[]>([]);
   /** a spark in flight from the catch spot to its bead; keyed so each catch restarts the animation */
@@ -106,15 +122,9 @@ export function FireflyWatchGame() {
   const session = useRef<FireflyWatchSession | null>(null);
   const t0 = useRef(0);
   const waits = useRef<number[]>([]);
+  const positions = useRef<ReturnType<typeof positionsForSeed>>([]);
   const retryRand = useRef(mulberry32(1));
-  const current = useRef<{
-    planned: number;
-    waitStart: number;
-    drawn: number | null;
-    falseStarts: number;
-  } | null>(null);
-  const phaseRef = useRef<Phase>("ready");
-  phaseRef.current = phase;
+  const current = useRef<WatchAttempt | null>(null);
   const lastEventAt = useRef(0);
   const glowToken = useRef(0);
 
@@ -147,9 +157,13 @@ export function FireflyWatchGame() {
   const now = () => performance.now() - t0.current;
 
   function beginSession() {
+    finalized.current = false;
+    bonusCatchReady.current = false;
+    setSaving(false);
     const n = bumpSessionCount("fireflyWatch");
     const form = pickWatchForm(n);
     waits.current = waitsForSeed(form.seed);
+    positions.current = positionsForSeed(form.seed);
     retryRand.current = mulberry32(form.seed ^ 0x9e3779b9);
     t0.current = performance.now();
     session.current = {
@@ -160,6 +174,7 @@ export function FireflyWatchGame() {
       skin: settings.skin,
       formId: form.id,
       seed: form.seed,
+      protocolVersion: WATCH_PROTOCOL_VERSION,
       reducedMotion: settings.reducedMotion,
       completed: false,
       excluded: false,
@@ -188,7 +203,11 @@ export function FireflyWatchGame() {
   function startEvent(index: number, retry: boolean, keepFalseStarts = 0) {
     timers.current.clearAll();
     const planned = plannedWaitFor(index, retry);
-    current.current = { planned, waitStart: now(), drawn: null, falseStarts: keepFalseStarts };
+    setSpark(null);
+    setPracticeSkip(false);
+    // Index-based placement keeps this firefly in place across retries and pauses.
+    setSprite(positions.current[index + WATCH_TIMING.practiceEvents]);
+    current.current = { index, planned, waitStart: now(), drawn: null, falseStarts: keepFalseStarts, resolved: false };
     setPhase("waiting");
     const token = ++glowToken.current;
     timers.current.set(() => void showGlow(token), planned);
@@ -210,13 +229,22 @@ export function FireflyWatchGame() {
       practice: idx.current < 0,
       plannedWaitMs: current.current.planned,
       waitStartMs: current.current.waitStart,
-      falseStartsBefore: current.current.falseStarts,
+      falseStartsBefore: partial.outcome === "falseStart" ? 0 : current.current.falseStarts,
       ...partial,
     });
     lastEventAt.current = performance.now();
   }
 
-  /** Light (or dim) the bead for scored event `index` the moment it resolves. */
+  function recordOutcome(outcome: "hit" | "timeout" | "invalid", tapMs: number | null = null): boolean {
+    if (!session.current || !current.current) return false;
+    const event = resolveWatchAttempt(current.current, outcome, tapMs);
+    if (!event) return false;
+    session.current.events.push(event);
+    lastEventAt.current = performance.now();
+    return true;
+  }
+
+  /** Record progress immediately; the flying spark is only visual feedback. */
   function settleBead(index: number, state: BeadState) {
     if (index < 0) return;
     setBeads((prev) => {
@@ -228,8 +256,7 @@ export function FireflyWatchGame() {
   }
 
   function advance() {
-    const cur = idx.current;
-    const next = cur + 1;
+    const next = (current.current?.index ?? idx.current) + 1;
     if (next >= WATCH_TIMING.scoredEvents) {
       setPhase("offerBonus");
       return;
@@ -239,13 +266,12 @@ export function FireflyWatchGame() {
   }
 
   function handleTimeout(token: number) {
-    if (token !== glowToken.current || !current.current) return;
-    logEvent({ stimulusDrawnMs: current.current.drawn, tapMs: null, reactionMs: null, outcome: "timeout" });
+    if (token !== glowToken.current || pauseRef.current || !recordOutcome("timeout")) return;
     settleBead(idx.current, "dim");
     const streak = timeoutStreakRef.current + 1;
     bumpTimeoutStreak(streak);
     setPhase("timeout");
-    if (streak >= WATCH_TIMING.checkInAfterTimeouts) {
+    if (streak >= WATCH_TIMING.checkInAfterTimeouts && idx.current < WATCH_TIMING.scoredEvents - 1) {
       // Several in a row floated away: stop the clock and ask, instead of letting the child drift.
       if (session.current) {
         session.current.nudges = (session.current.nudges ?? 0) + 1;
@@ -261,65 +287,58 @@ export function FireflyWatchGame() {
     timers.current.set(advance, reduced ? 700 + hold : WATCH_TIMING.timeoutDriftMs + hold);
   }
 
-  const onCatch = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      const tapMs = e.timeStamp - t0.current;
-      const p = phaseRef.current;
-      setCatchPressed(true);
-      window.setTimeout(() => setCatchPressed(false), 200);
-      if (p === "glow" && current.current) {
-        glowToken.current++;
-        timers.current.clearAll();
-        const drawn = current.current.drawn;
-        if (drawn == null) {
-          // Tap arrived before the glow frame was presented: treat as a false start.
-          falseStart();
-          return;
-        }
-        logEvent({ stimulusDrawnMs: drawn, tapMs, reactionMs: tapMs - drawn, outcome: "hit" });
-        playChime(settings.sound);
-        bumpTimeoutStreak(0);
-        setPhase("caught");
-        if (idx.current >= 0) {
-          // The light for this catch: a spark flies to the strip and its bead lights on arrival.
-          const bead = idx.current;
-          const key = tapMs;
-          if (settings.reducedMotion) {
-            settleBead(bead, "lit");
-          } else {
-            setSpark({ key, bead });
-            timers.current.set(() => {
-              settleBead(bead, "lit");
-              setSpark((cur) => (cur && cur.key === key ? null : cur));
-            }, WATCH_TIMING.sparkFlyMs);
-          }
-        }
-        // The last catch waits for its spark to land so the child sees the strip fill.
-        const last = idx.current === WATCH_TIMING.scoredEvents - 1 && !settings.reducedMotion;
-        timers.current.set(advance, last ? WATCH_TIMING.sparkFlyMs + 450 : WATCH_TIMING.catchGlowMs);
+  function onCatch(e: React.PointerEvent<HTMLButtonElement>) {
+    if (pauseRef.current) return;
+    const tapMs = e.timeStamp - t0.current;
+    const currentPhase = phaseRef.current;
+    setCatchPressed(true);
+    window.setTimeout(() => setCatchPressed(false), 200);
+    if (currentPhase === "glow" && current.current && !current.current.resolved) {
+      glowToken.current++;
+      timers.current.clearAll();
+      if (current.current.drawn == null) {
+        // A tap before the glow was actually presented is an early press.
+        falseStart();
         return;
       }
-      if (p === "waiting") {
-        falseStart();
+      if (!recordOutcome("hit", tapMs)) return;
+      playChime(settings.sound);
+      bumpTimeoutStreak(0);
+      setPhase("caught");
+      if (idx.current >= 0) {
+        const bead = idx.current;
+        settleBead(bead, "lit");
+        if (!settings.reducedMotion) {
+          setSpark({ key: tapMs, bead });
+          timers.current.set(() => setSpark(null), WATCH_TIMING.sparkFlyMs);
+        }
       }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings.sound],
-  );
+      const last = idx.current === WATCH_TIMING.scoredEvents - 1 && !settings.reducedMotion;
+      timers.current.set(advance, last ? WATCH_TIMING.sparkFlyMs + 450 : WATCH_TIMING.catchGlowMs);
+      return;
+    }
+    if (currentPhase === "waiting") falseStart();
+  }
 
   function falseStart() {
-    if (!current.current || !session.current) return;
+    if (!current.current || current.current.resolved || !session.current || pauseRef.current) return;
     glowToken.current++;
     timers.current.clearAll();
     current.current.falseStarts += 1;
     bumpTimeoutStreak(0);
-    const total = session.current.events.reduce((n, ev) => n + ev.falseStartsBefore, 0) + current.current.falseStarts;
     logEvent({ stimulusDrawnMs: null, tapMs: now(), reactionMs: null, outcome: "falseStart" });
-    if (total >= WATCH_TIMING.maxFalseStarts && idx.current >= 0) {
+    setPhase("oops");
+    if (idx.current < 0 && current.current.falseStarts >= WATCH_TIMING.maxPracticeFalseStarts) {
+      recordOutcome("invalid");
+      setPracticeSkip(true);
+      timers.current.set(advance, WATCH_TIMING.oopsBubbleMs + 500);
+      return;
+    }
+    const total = session.current.events.filter((event) => !event.practice && event.outcome === "falseStart").length;
+    if (total >= WATCH_TIMING.maxFalseStarts) {
       void endExcluded();
       return;
     }
-    setPhase("oops");
     const keep = current.current.falseStarts;
     const at = idx.current;
     timers.current.set(() => startEvent(at, true, keep), WATCH_TIMING.oopsBubbleMs);
@@ -330,96 +349,117 @@ export function FireflyWatchGame() {
   function doPause(kind: Exclude<PauseKind, null>) {
     const p = phaseRef.current;
     const playing = p === "waiting" || p === "glow" || p === "caught" || p === "oops" || p === "timeout";
-    if (!playing || pause) return;
+    if (!playing || pauseRef.current) return;
     glowToken.current++;
     timers.current.clearAll();
+    setSpark(null);
     if (session.current && kind !== "checkIn") session.current.pauses += 1;
     setPause(kind);
+    if (kind === "checkIn") {
+      timers.current.set(() => void stopForNow(), WATCH_TIMING.checkInRestMs);
+    }
   }
 
   useInterruption(() => doPause("interrupted"), inPlay && !pause);
 
   function resume() {
-    const wasCheckIn = pause === "checkIn";
+    timers.current.clearAll();
     setPause(null);
     bumpTimeoutStreak(0);
-    if (wasCheckIn) {
-      // The firefly that floated away was already logged; carry on with the next one.
-      const next = idx.current + 1;
-      if (next >= WATCH_TIMING.scoredEvents) {
-        setPhase("offerBonus");
-        return;
-      }
-      setEventIndex(next);
-      startEvent(next, false);
+    const next = current.current ? watchResumeIndex(current.current) : idx.current;
+    if (next >= WATCH_TIMING.scoredEvents) {
+      setPhase("offerBonus");
       return;
     }
-    // The event in flight is dropped and gets a brand-new wait.
-    startEvent(idx.current, true, current.current?.falseStarts ?? 0);
+    const retry = current.current != null && !current.current.resolved;
+    const falseStarts = retry ? current.current?.falseStarts ?? 0 : 0;
+    setEventIndex(next);
+    startEvent(next, retry, falseStarts);
+  }
+
+  /** Claim the one save before yielding, so rapid presses cannot award twice. */
+  function claimFinalization(): FireflyWatchSession | null {
+    if (!session.current || finalized.current) return null;
+    finalized.current = true;
+    glowToken.current++;
+    timers.current.clearAll();
+    bonusCatchReady.current = false;
+    setPause(null);
+    setSpark(null);
+    setBonusSpot(null);
+    setSaving(true);
+    return session.current;
   }
 
   async function stopForNow() {
-    timers.current.clearAll();
-    setPause(null);
-    if (session.current) {
-      session.current.endedAt = new Date().toISOString();
-      session.current.completed = false;
-      try {
-        await finishSession(session.current, REWARD_FOR_GAME.fireflyWatch, performance.now());
-      } catch {
-        /* storage unavailable: still let the child leave gracefully */
-      }
-    }
+    const visit = claimFinalization();
+    if (!visit) return;
     setPhase("stoppedEarly");
+    visit.endedAt = new Date().toISOString();
+    visit.completed = false;
+    try {
+      await finishSession(visit, REWARD_FOR_GAME.fireflyWatch, performance.now());
+    } catch {
+      /* storage unavailable: still let the child leave gracefully */
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function endExcluded() {
-    timers.current.clearAll();
-    if (session.current) {
-      session.current.endedAt = new Date().toISOString();
-      session.current.excluded = true;
-      session.current.exclusionReason = "10 false starts";
-      try {
-        await finishSession(session.current, REWARD_FOR_GAME.fireflyWatch, performance.now());
-      } catch {
-        /* ignore */
-      }
-    }
+    const visit = claimFinalization();
+    if (!visit) return;
     setPhase("excluded");
+    visit.endedAt = new Date().toISOString();
+    visit.excluded = true;
+    visit.exclusionReason = "10 false starts";
+    try {
+      await finishSession(visit, REWARD_FOR_GAME.fireflyWatch, performance.now());
+    } catch {
+      /* storage unavailable: still let the child leave gracefully */
+    } finally {
+      setSaving(false);
+    }
   }
 
   /* --------------------------- finishing ------------------------------ */
 
   async function completeSession() {
-    if (!session.current) return;
-    setSaving(true);
-    session.current.endedAt = new Date().toISOString();
-    session.current.completed = true;
+    const visit = claimFinalization();
+    if (!visit) return;
+    visit.endedAt = new Date().toISOString();
+    visit.completed = true;
     try {
-      await finishSession(session.current, REWARD_FOR_GAME.fireflyWatch, lastEventAt.current);
+      await finishSession(visit, REWARD_FOR_GAME.fireflyWatch, lastEventAt.current);
     } catch {
-      /* ignore */
+      /* storage unavailable: still let the child finish gracefully */
+    } finally {
+      setSaving(false);
+      setPhase("done");
     }
-    setSaving(false);
-    setPhase("done");
   }
 
   function startBonus() {
+    if (finalized.current || phaseRef.current !== "offerBonus") return;
     setPhase("bonus");
     setBonusLeft(5);
     scheduleBonusSpark();
   }
 
   function scheduleBonusSpark() {
+    bonusCatchReady.current = false;
     setBonusSpot(null);
     timers.current.set(() => {
+      if (finalized.current || phaseRef.current !== "bonus") return;
+      bonusCatchReady.current = true;
       const r = Math.random;
       setBonusSpot({ x: 80 + r() * 230, y: 230 + r() * 300 });
     }, 500 + Math.random() * 900);
   }
 
   function bonusCatch() {
-    if (!bonusSpot) return;
+    if (finalized.current || !bonusCatchReady.current || !bonusSpot) return;
+    bonusCatchReady.current = false;
     playChime(settings.sound);
     const left = bonusLeft - 1;
     setBonusLeft(left);
@@ -432,6 +472,7 @@ export function FireflyWatchGame() {
   /* --------------------------- calibration ---------------------------- */
 
   function onCalibTap(e: React.PointerEvent<HTMLButtonElement>) {
+    if (phaseRef.current !== "calibrate") return;
     const t = e.timeStamp;
     setCatchPressed(true);
     window.setTimeout(() => setCatchPressed(false), 160);
@@ -445,6 +486,7 @@ export function FireflyWatchGame() {
       const med = s[Math.floor(s.length / 2)];
       update({ calibration: { medianGapMs: Math.round(med), at: new Date().toISOString() } });
       timers.current.set(() => {
+        if (phaseRef.current !== "calibrate") return;
         calibRef.current = [];
         setCalibTaps([]);
         beginSession();
@@ -474,54 +516,44 @@ export function FireflyWatchGame() {
     } else beginSession();
   };
 
+  if (phase === "ready") {
+    return (
+      <Stage scrollable>
+        <Scene variant="forest" twinkle reducedMotion={reduced} style={{ position: "absolute", inset: 0 }} />
+        <GameReady
+          gameNumber={1}
+          title="Firefly Watch"
+          instructions="Look around for the glow, then tap Catch. Each firefly appears in a new spot."
+          illustration={<Skin id={settings.skin} size={120} glow className={reduced ? undefined : "glow-pulse"} />}
+          companion={<Fox pose="idle" width={110} breathing reducedMotion={reduced} />}
+          encouragement={<>Two practice turns first. Then each firefly fills a light, even if it floats away.</>}
+          soundButton={soundButton}
+          onBack={() => router.push("/basecamp")}
+          onStart={onReadyStart}
+          onHearInstructions={() => {
+            unlockAudio();
+            speak(READY_VOICE, true);
+          }}
+        />
+      </Stage>
+    );
+  }
+
   return (
     <Stage>
       <Scene variant="forest" twinkle={phase !== "calibrate"} reducedMotion={reduced} />
-
-      {/* ------------------------------ READY ------------------------------ */}
-      {phase === "ready" && (
-        <>
-          <At x={20} y={56}>
-            <IconButton icon="back" label="Back to Basecamp" onClick={() => router.push("/basecamp")} />
-          </At>
-          <At x={322} y={56}>{soundButton}</At>
-          <At x={0} y={130} w={390} className="pop-in" style={{ textAlign: "center" }}>
-            <Chip>Game 1 of 3</Chip>
-            <div className="t-title-lg" style={{ marginTop: 14 }}>Firefly Watch</div>
-            <div className="t-body" style={{ marginTop: 10, padding: "0 36px" }}>
-              Catch each firefly the moment it glows.
-            </div>
-          </At>
-          <At x={195} y={330} w={120} h={120} center>
-            <Skin id={settings.skin} size={120} glow className={reduced ? undefined : "glow-pulse"} />
-          </At>
-          <At x={20} y={572}>
-            <Fox pose="idle" width={110} breathing reducedMotion={reduced} />
-          </At>
-          <At x={140} y={548} className="pop-in-2">
-            <SpeechBubble width={230}>Ready? We&apos;ll practice twice first. Those don&apos;t count!</SpeechBubble>
-          </At>
-          <At x={55} y={708} w={280} className="pop-in-3">
-            <PrimaryButton onClick={onReadyStart}>I&apos;m ready</PrimaryButton>
-          </At>
-          <At x={0} y={782} w={390} style={{ textAlign: "center" }}>
-            <TextButton
-              onClick={() => {
-                unlockAudio();
-                speak(READY_VOICE, true);
-              }}
-            >
-              Hear the instructions
-            </TextButton>
-          </At>
-        </>
-      )}
 
       {/* --------------------------- CALIBRATION --------------------------- */}
       {phase === "calibrate" && (
         <>
           <At x={20} y={56}>
-            <IconButton icon="back" label="Back" onClick={() => setPhase("ready")} />
+            <IconButton icon="back" label="Back" onClick={() => {
+              timers.current.clearAll();
+              glowToken.current++;
+              calibRef.current = [];
+              setCalibTaps([]);
+              setPhase("ready");
+            }} />
           </At>
           <At x={0} y={64} w={390} style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
             <Pips filled={calibTaps.length} />
@@ -529,7 +561,7 @@ export function FireflyWatchGame() {
           <At x={0} y={120} w={390} style={{ textAlign: "center", padding: "0 30px" }}>
             <div className="t-title">Warm up your thumb</div>
             <div className="t-body" style={{ marginTop: 10 }}>
-              Tap Catch ten times, quick as you like.
+              Tap Catch ten times. Each tap fills one warm-up light.
             </div>
           </At>
           <At x={20} y={608}>
@@ -547,39 +579,40 @@ export function FireflyWatchGame() {
           <At x={20} y={56}>
             <IconButton icon="pause" label="Pause" onClick={() => doPause("user")} />
           </At>
-          <At x={STRIP_LEFT} y={STRIP_TOP} style={{ pointerEvents: "none" }}>
-            <BeadStrip beads={beads} total={WATCH_TIMING.scoredEvents} bead={9} gap={3} rows={2} label="Fireflies caught" />
-          </At>
+          {isPractice ? (
+            <At x={84} y={58} w={222} h={42} style={{ display: "grid", placeItems: "center", textAlign: "center" }}>
+              <span className="t-body-cream">Practice {eventIndex + WATCH_TIMING.practiceEvents + 1} of {WATCH_TIMING.practiceEvents}</span>
+            </At>
+          ) : (
+            <>
+              <At x={STRIP_LEFT} y={STRIP_TOP} style={{ pointerEvents: "none" }}>
+                <BeadStrip beads={beads} total={WATCH_TIMING.scoredEvents} bead={9} gap={3} rows={2} label="Fireflies finished" />
+              </At>
+              <At x={24} y={103} w={342} style={{ textAlign: "center" }}>
+                <span className="t-note">Bright = caught · Soft = floated by</span>
+              </At>
+            </>
+          )}
           <At x={322} y={56}>{soundButton}</At>
 
-          <At x={0} y={120} w={390} h={60} style={{ textAlign: "center", padding: "0 24px" }}>
-            {isPractice && (phase === "glow" || phase === "caught") ? (
-              <>
-                <div className="t-title-lg" style={{ color: palette.glow }}>Now!</div>
-                <div className="t-body" style={{ marginTop: 6 }}>Catch the firefly!</div>
-              </>
-            ) : isPractice ? (
-              <>
-                <div className="t-title">Wait for the glow…</div>
-                <div className="t-body" style={{ marginTop: 8 }}>Practice round. Keep your thumb on Catch.</div>
-              </>
-            ) : (
-              <>
-                <div className="t-title">Wait for the glow…</div>
-                <div className="t-body" style={{ marginTop: 8 }}>Each catch lights a bead up top.</div>
-              </>
-            )}
+          <At x={0} y={138} w={390} style={{ textAlign: "center", padding: "0 24px" }}>
+            <div className="t-title" style={phase === "glow" ? { color: palette.glow } : undefined}>
+              {phase === "glow" ? "Now! Tap Catch!" : phase === "caught" ? "You caught it!" : phase === "timeout" ? "On to the next one." : practiceSkip ? "Let’s keep going." : "Wait for the glow…"}
+            </div>
+            <div className="t-body" style={{ marginTop: 8 }}>
+              {isPractice ? "Just practice. The lights start after this." : "Every firefly moves you forward."}
+            </div>
           </At>
 
           {/* The caught firefly flying up to its bead on the strip. */}
           {spark && (
-            <At key={spark.key} x={SPRITE.x} y={SPRITE.y} w={60} h={60} center style={{ pointerEvents: "none", zIndex: 3 }}>
+            <At key={spark.key} x={sprite.x} y={sprite.y} w={60} h={60} center style={{ pointerEvents: "none", zIndex: 3 }}>
               <div
                 className="spark-fly"
                 style={
                   {
-                    "--fly-dx": `${STRIP_LEFT + STRIP.beadCenterX(spark.bead) - SPRITE.x}px`,
-                    "--fly-dy": `${STRIP_TOP + STRIP.beadCenterY(spark.bead) - SPRITE.y}px`,
+                    "--fly-dx": `${STRIP_LEFT + STRIP.beadCenterX(spark.bead) - sprite.x}px`,
+                    "--fly-dy": `${STRIP_TOP + STRIP.beadCenterY(spark.bead) - sprite.y}px`,
                     "--fly-ms": `${WATCH_TIMING.sparkFlyMs}ms`,
                   } as React.CSSProperties
                 }
@@ -591,7 +624,8 @@ export function FireflyWatchGame() {
 
           {/* The stimulus: a single frame at full brightness, no fade-in. */}
           {(phase === "glow" || phase === "timeout") && (
-            <At x={SPRITE.x} y={SPRITE.y} w={120} h={120} center>
+            <At x={sprite.x} y={sprite.y} w={120} h={120} center>
+              <div data-testid="watch-firefly" data-x={sprite.x} data-y={sprite.y}>
               <Skin
                 id={settings.skin}
                 size={120}
@@ -599,6 +633,7 @@ export function FireflyWatchGame() {
                 className={phase === "timeout" && !reduced ? "drift-up-fade" : undefined}
                 style={phase === "timeout" && reduced ? { visibility: "hidden" } : undefined}
               />
+              </div>
             </At>
           )}
 
@@ -617,13 +652,15 @@ export function FireflyWatchGame() {
           )}
           {phase === "oops" && (
             <At x={BUBBLE.x} y={BUBBLE.y}>
-              <SpeechBubble width={BUBBLE.w} tone="navy">Oops, wait for the glow!</SpeechBubble>
+              <SpeechBubble width={BUBBLE.w} tone="navy">
+                {practiceSkip ? "That’s okay. Let’s try the next one." : "Wait until it glows, then tap Catch."}
+              </SpeechBubble>
             </At>
           )}
           {phase === "timeout" && !pause && (
             <At x={BUBBLE.x} y={BUBBLE.y}>
               {timeoutStreak >= WATCH_TIMING.nudgeAfterTimeouts ? (
-                <SpeechBubble width={BUBBLE.w}>Still with me? Tap Catch the moment it glows!</SpeechBubble>
+                <SpeechBubble width={BUBBLE.w}>You’re doing fine. Try the next glow, or take a break.</SpeechBubble>
               ) : (
                 <SpeechBubble width={BUBBLE.w}>It floated away. Here comes another!</SpeechBubble>
               )}
@@ -654,7 +691,7 @@ export function FireflyWatchGame() {
       {pause === "interrupted" && (
         <PauseOverlay
           title="We paused for you."
-          primary="Start this one again"
+          primary="Keep going"
           onPrimary={resume}
           secondary="Stop for now"
           onSecondary={() => void stopForNow()}
@@ -663,7 +700,7 @@ export function FireflyWatchGame() {
       {pause === "checkIn" && (
         <PauseOverlay
           title="Still there?"
-          body="A few fireflies floated by. Want to keep catching, or rest for now? Either is fine."
+          body="A few fireflies floated by. Keep going, or take a rest. If you don’t choose in 30 seconds, we’ll rest for now."
           primary="Keep catching"
           onPrimary={resume}
           secondary="Rest for now"
@@ -678,7 +715,7 @@ export function FireflyWatchGame() {
           <At x={0} y={150} w={390} style={{ textAlign: "center", padding: "0 30px" }}>
             <div className="t-title">You made it to the end!</div>
             <div className="t-body" style={{ marginTop: 10 }}>
-              The strip is full. Want a playful bonus round? It&apos;s just for fun.
+              Every firefly had its turn. You can finish here, or catch a few bonus fireflies for fun.
             </div>
           </At>
           <At x={195} y={370} w={120} h={120} center>
@@ -688,10 +725,12 @@ export function FireflyWatchGame() {
             <Fox pose="hop" width={110} reducedMotion={reduced} />
           </At>
           <At x={55} y={640} w={280}>
-            <PrimaryButton onClick={startBonus}>Bonus round</PrimaryButton>
+            <PrimaryButton onClick={() => void completeSession()} disabled={saving}>Finish</PrimaryButton>
           </At>
           <At x={55} y={716} w={280}>
-            <OutlineButton onClick={() => void completeSession()}>Skip</OutlineButton>
+            <fieldset disabled={saving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0, opacity: saving ? 0.5 : 1 }}>
+              <OutlineButton onClick={startBonus}>Bonus round</OutlineButton>
+            </fieldset>
           </At>
         </>
       )}
@@ -719,9 +758,9 @@ export function FireflyWatchGame() {
             <Fox pose="hop" width={110} reducedMotion={reduced} />
           </At>
           <At x={55} y={716} w={280}>
-            <OutlineButton onClick={() => { timers.current.clearAll(); setBonusSpot(null); void completeSession(); }}>
-              Skip
-            </OutlineButton>
+            <fieldset disabled={saving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0, opacity: saving ? 0.5 : 1 }}>
+              <OutlineButton onClick={() => void completeSession()}>Finish</OutlineButton>
+            </fieldset>
           </At>
         </>
       )}

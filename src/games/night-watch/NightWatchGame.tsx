@@ -23,17 +23,16 @@ import { Scene } from "@/components/art/scenes";
 import { RewardIcon } from "@/components/art/rewards";
 import type { CompanionPose, FoxPose } from "@/components/art/types";
 import { At, Stage } from "@/components/Stage";
+import { GameReady } from "@/components/GameReady";
 import {
   BigCircleButton,
   Card,
-  Chip,
   IconButton,
   LockNote,
   OutlineButton,
   Overlay,
   Pips,
   PrimaryButton,
-  RewardCard,
   SpeechBubble,
   TextButton,
   ink,
@@ -49,6 +48,7 @@ import {
   pickNightWatchForm,
 } from "@/lib/forms/nightWatch";
 import { mulberry32, uuid } from "@/lib/rng";
+import { finalizeOutcomes, invalidateFinalGlowOnPause, outcomeFor, responseWindowEndsAt } from "@/lib/nightWatch";
 import { classifyNightWatchTap } from "@/lib/scoring";
 import { NIGHT_WATCH_REWARD, Timers, finishSession, nextPaint, useInterruption } from "@/lib/session";
 import { useSettings } from "@/lib/settings";
@@ -61,7 +61,6 @@ type Phase =
   | "getReady"
   | "watch"
   | "endPause"
-  | "offerCooldown"
   | "cooldown"
   | "done"
   | "stoppedEarly";
@@ -122,18 +121,6 @@ const WORLD_COPY: Record<WorldId, WorldCopy> = {
 /* Pure helpers                                                        */
 /* ------------------------------------------------------------------ */
 
-/** The outcome a single glow log entry earns. Invalid glows stay invalid. */
-export function outcomeFor(ev: GlowEvent): GlowEvent["outcome"] {
-  if (ev.outcome === "invalid") return "invalid";
-  if (ev.kind === "double") return ev.reactionMs != null ? "hit" : "miss";
-  return ev.taps.length > 0 ? "falseAlarm" : "correctPass";
-}
-
-/** Finalise every glow's outcome once all hit windows have closed. Pure. */
-export function finalizeOutcomes(events: GlowEvent[]): GlowEvent[] {
-  return events.map((ev) => ({ ...ev, outcome: outcomeFor(ev) }));
-}
-
 /** Fifteen relaxed glows for the optional cooldown: seeded, never scored, never logged. */
 function cooldownGlows(seed: number): Glow[] {
   const rand = mulberry32((seed ^ 0x51ab7) >>> 0);
@@ -167,6 +154,7 @@ export function NightWatchGame() {
   const [activeLight, setActiveLight] = useState<number | null>(null);
   const [lit, setLit] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressMode, setProgressMode] = useState<RunMode>("practice");
   const [nod, setNod] = useState(false);
   const [signalPressed, setSignalPressed] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -194,7 +182,7 @@ export function NightWatchGame() {
   const nudgeTimer = useRef<number | null>(null);
 
   const line = `${copy.headline} Tap ${copy.button} when one glows twice.`;
-  const bubble = `Most ${copy.plural} glow once. Tap ${copy.button} only when one glows twice! We'll practice first.`;
+  const bubble = `Most ${copy.plural} glow once. Tap ${copy.button} when one glows twice. We'll practice first. The top lights show how far we've watched. It's okay to miss a glow.`;
   const voice = `${copy.headline} ${bubble}`;
 
   const inRun = phase === "practice" || phase === "watch" || phase === "cooldown" || phase === "getReady" || phase === "endPause";
@@ -238,6 +226,7 @@ export function NightWatchGame() {
     intervalRef.current = settings.gentlePace ? T.gentleIntervalMs : T.glowIntervalMs;
     missedStreak.current = 0;
     tappedSinceDouble.current = false;
+    setPause(null);
     setNudge(null);
     t0.current = clockNow();
     saved.current = false;
@@ -262,7 +251,7 @@ export function NightWatchGame() {
     startPractice();
   }
 
-  /** Every glow logged so far: both practice runs (if replayed) then the watch, outcomes finalised. */
+  /** Every glow logged so far: practice then the watch, outcomes finalised. */
   function assembleEvents(): GlowEvent[] {
     const watch = run.current?.mode === "watch" ? run.current.events : [];
     return [...finalizeOutcomes(practiceLog.current), ...finalizeOutcomes(watch)];
@@ -283,6 +272,8 @@ export function NightWatchGame() {
       invalidLeft: 0,
       finalized: false,
     };
+    setProgress(0);
+    setProgressMode(mode);
     goPhase(mode);
     timers.current.set(() => void startGlow(0, token), leadMs);
   }
@@ -296,6 +287,8 @@ export function NightWatchGame() {
   function startWatch() {
     setHint(null);
     clearLights();
+    missedStreak.current = 0;
+    tappedSinceDouble.current = false;
     setProgress(0);
     startRun("watch", watchList.current, 400);
   }
@@ -319,6 +312,7 @@ export function NightWatchGame() {
     const g = r.list[k];
     const target = targetFor(r, k);
     r.next = k + 1;
+    setProgress(k + 1);
 
     let ev: GlowEvent | null = null;
     if (r.mode !== "cooldown") {
@@ -337,7 +331,6 @@ export function NightWatchGame() {
       if (r.invalidLeft > 0) r.invalidLeft -= 1;
       r.events.push(ev);
       if (r.mode === "practice") practiceLog.current.push(ev);
-      else setProgress(k + 1);
     }
 
     // First glow: fade up (100 ms), hold (100 ms), fade down (200 ms).
@@ -366,10 +359,12 @@ export function NightWatchGame() {
 
     // The previous glow's hit window closes 300 ms after this one starts.
     if (k > 0) {
+      const previous = r.events[k - 1];
+      const closesAt = responseWindowEndsAt(previous?.firstDrawnMs ?? drawn, intervalRef.current, drawn);
       if (r.mode === "practice") {
-        timers.current.set(() => evaluatePractice(k - 1), delayTo(target + T.hitWindowMaxAfterNextMs));
+        timers.current.set(() => evaluatePractice(k - 1), delayTo(t0.current + closesAt));
       } else if (r.mode === "watch") {
-        timers.current.set(() => evaluateWatch(k - 1, token), delayTo(target + T.hitWindowMaxAfterNextMs));
+        timers.current.set(() => evaluateWatch(k - 1, token), delayTo(t0.current + closesAt));
       }
     }
 
@@ -385,12 +380,17 @@ export function NightWatchGame() {
     const r = run.current;
     if (!r || token !== runToken.current) return;
     clearLights();
+    const last = r.events[r.events.length - 1];
+    const windowDelay = last?.firstDrawnMs != null
+      ? delayTo(t0.current + responseWindowEndsAt(last.firstDrawnMs, intervalRef.current))
+      : T.hitWindowMaxAfterNextMs;
     if (r.mode === "practice") {
       // Let the last glow's window close, read the hint, then decide.
       timers.current.set(() => {
         evaluatePractice(r.list.length - 1);
-        timers.current.set(decidePractice, 1000);
-      }, T.hitWindowMaxAfterNextMs);
+        // One practice pass is enough: trying, rather than a correct response, opens the watch.
+        timers.current.set(() => goGetReady(startWatch), 1000);
+      }, windowDelay);
       return;
     }
     if (r.mode === "watch") {
@@ -398,25 +398,12 @@ export function NightWatchGame() {
       timers.current.set(() => {
         finalizeWatch();
         void saveCompleted();
-      }, T.hitWindowMaxAfterNextMs);
-      timers.current.set(() => goPhase("offerCooldown"), T.endPauseMs);
+      }, windowDelay);
+      timers.current.set(() => goPhase("done"), Math.max(T.endPauseMs, windowDelay));
       return;
     }
     // cooldown
     goPhase("done");
-  }
-
-  function decidePractice() {
-    const s = session.current;
-    const r = run.current;
-    if (!s || !r) return;
-    const anyHit = r.events.some((ev) => ev.kind === "double" && ev.reactionMs != null);
-    if (!anyHit && !s.practiceReplayed) {
-      s.practiceReplayed = true;
-      goGetReady(startPractice);
-    } else {
-      goGetReady(startWatch);
-    }
   }
 
   /**
@@ -440,7 +427,7 @@ export function NightWatchGame() {
     missedStreak.current += 1;
     if (missedStreak.current === T.nudgeAfterMissedDoubles) {
       s.nudges = (s.nudges ?? 0) + 1;
-      showNudge(`Still watching? Tap ${copy.button} when one glows twice.`);
+      showNudge(`Keep trying. Tap ${copy.button} when one glows twice.`);
     } else if (missedStreak.current >= T.checkInAfterMissedDoubles) {
       s.nudges = (s.nudges ?? 0) + 1;
       s.checkedIn = true;
@@ -468,7 +455,7 @@ export function NightWatchGame() {
     const ev = r.events[k];
     if (!ev) return;
     const outcome = outcomeFor(ev);
-    if (outcome === "miss") setHint(`That one glowed twice. Tap ${copy.button}!`);
+    if (outcome === "miss") setHint(`That was twice. Try ${copy.button} on the next one.`);
     else if (outcome === "falseAlarm") setHint(`That one glowed once. Let it pass.`);
     else if (outcome === "hit") setHint("Nice spot!");
     else setHint(null);
@@ -549,9 +536,12 @@ export function NightWatchGame() {
       const inFlight = r.events[r.events.length - 1];
       if (inFlight) inFlight.outcome = "invalid";
       r.invalidLeft = T.invalidAfterResume;
+    } else if (r && p === "endPause") {
+      invalidateFinalGlowOnPause(r.events, clockNow() - t0.current, intervalRef.current, r.finalized);
     }
     if (session.current && kind !== "checkIn") session.current.pauses += 1;
     setPause(kind);
+    if (kind === "checkIn") timers.current.set(() => void stopForNow(), T.checkInRestMs);
   }
 
   useInterruption(() => doPause("interrupted"), inRun && !pause);
@@ -572,6 +562,7 @@ export function NightWatchGame() {
   }
 
   function resume() {
+    timers.current.clearAll();
     setPause(null);
     missedStreak.current = 0;
     tappedSinceDouble.current = false;
@@ -586,7 +577,7 @@ export function NightWatchGame() {
     if (p === "endPause") {
       finalizeWatch();
       if (!saved.current) void saveCompleted();
-      goPhase("offerCooldown");
+      goPhase("done");
       return;
     }
     goGetReady(continueRun);
@@ -599,10 +590,13 @@ export function NightWatchGame() {
     clearLights();
     if (saved.current) {
       // The watch itself was already saved; the child was only in the cooldown.
-      goPhase("done");
+      goPhase(session.current?.completed ? "done" : "stoppedEarly");
       return;
     }
+    goPhase("stoppedEarly");
     if (session.current) {
+      saved.current = true;
+      setSaving(true);
       session.current.endedAt = new Date().toISOString();
       session.current.completed = false;
       session.current.events = assembleEvents();
@@ -611,9 +605,8 @@ export function NightWatchGame() {
       } catch {
         /* storage unavailable: still let the child leave gracefully */
       }
-      saved.current = true;
+      setSaving(false);
     }
-    goPhase("stoppedEarly");
   }
 
   /* ------------------------------ finishing ----------------------------- */
@@ -658,8 +651,68 @@ export function NightWatchGame() {
     beginSession();
   };
 
+  if (phase === "ready") {
+    return (
+      <Stage key="ready" scrollable>
+        <Scene variant={copy.scene} twinkle reducedMotion={reduced} style={{ position: "absolute", inset: 0 }} />
+        <GameReady
+          gameNumber={3}
+          title={copy.title}
+          instructions={line}
+          illustration={<OnceTwiceCard world={world} glow={glow} button={copy.button} />}
+          companion={<Companion world={world} pose="waving" width={110} breathing reducedMotion={reduced} />}
+          encouragement={bubble}
+          soundButton={soundButton}
+          onBack={() => router.push("/basecamp")}
+          onStart={onReadyStart}
+          onHearInstructions={() => {
+            unlockAudio();
+            speak(voice, true);
+          }}
+        />
+      </Stage>
+    );
+  }
+
+  if (phase === "done" || phase === "stoppedEarly") {
+    const rested = phase === "stoppedEarly";
+    const reward = NIGHT_WATCH_REWARD[world];
+    return (
+      <Stage key="ending" scrollable>
+        <Scene variant={copy.scene} reducedMotion={reduced} style={{ position: "absolute", inset: 0 }} />
+        <main style={{ position: "relative", padding: "28px 24px 40px" }}>
+          <header style={{ display: "flex", justifyContent: "space-between", marginBottom: 32 }}>
+            <IconButton icon="back" label="Back to Basecamp" onClick={() => router.push("/basecamp")} />
+            {soundButton}
+          </header>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 22, textAlign: "center" }}>
+            <Companion world={world} pose="waving" width={130} reducedMotion={reduced} />
+            <h1 className="t-title" style={{ margin: 0, textWrap: "balance" }}>{rested ? "Thanks for trying." : "A little watch, all done."}</h1>
+            <p className="t-body" style={{ margin: 0, maxWidth: 330 }}>
+              {rested ? "Let’s take a rest. You can come back whenever you like." : "You don’t need to catch every glow. Spending a little time together is enough."}
+            </p>
+            <Card style={{ width: "100%", maxWidth: 340, display: "flex", alignItems: "center", gap: 16, textAlign: "left" }}>
+              <span aria-hidden style={{ flex: "none" }}><RewardIcon id={reward.id} size={64} /></span>
+              <div>
+                <div className="t-button" style={{ color: ink, lineHeight: 1.2 }}>{reward.name}</div>
+                <div className="t-note" style={{ color: inkSoft, marginTop: 8 }}>A keepsake for your visit.</div>
+              </div>
+            </Card>
+            {saving ? <p className="t-note" role="status">Saving your visit on this device…</p> : <LockNote />}
+            <div style={{ display: "grid", gap: 20, width: "100%", maxWidth: 320 }}>
+              <PrimaryButton width="100%" onClick={() => router.push("/basecamp")}>Back to Basecamp</PrimaryButton>
+              <PrimaryButton width="100%" glowColor={palette.cream} edgeColor={tan} disabled={saving} onClick={() => goPhase("ready")}>Try again</PrimaryButton>
+              {!rested && !saving && <TextButton onClick={startCooldown}>A little more, just for fun</TextButton>}
+            </div>
+          </div>
+        </main>
+      </Stage>
+    );
+  }
+
   const companionPose: CompanionPose = nod ? "nod" : "idle";
   const showHint = phase === "practice" && hint != null;
+  const progressTotal = progressMode === "practice" ? PRACTICE_COUNT : progressMode === "cooldown" ? T.cooldownGlows : watchLength;
 
   return (
     <Stage>
@@ -670,44 +723,7 @@ export function NightWatchGame() {
         html .nw-glow[data-fade="down"] { transition-duration: ${T.fadeDownMs}ms !important; }
       `}</style>
 
-      <Scene variant={copy.scene} twinkle={phase === "ready" || phase === "done"} reducedMotion={reduced} />
-
-      {/* ------------------------------ READY ------------------------------ */}
-      {phase === "ready" && (
-        <>
-          <At x={20} y={56}>
-            <IconButton icon="back" label="Back to Basecamp" onClick={() => router.push("/basecamp")} />
-          </At>
-          <At x={322} y={56}>{soundButton}</At>
-          <At x={0} y={130} w={390} className="pop-in" style={{ textAlign: "center" }}>
-            <Chip>Game 3 of 3</Chip>
-            <div className="t-title-lg" style={{ marginTop: 14 }}>{copy.title}</div>
-            <div className="t-body" style={{ marginTop: 10, padding: "0 36px" }}>{line}</div>
-          </At>
-          <At x={40} y={300}>
-            <OnceTwiceCard world={world} glow={glow} button={copy.button} />
-          </At>
-          <At x={140} y={482} className="pop-in-2">
-            <SpeechBubble width={230}>{bubble}</SpeechBubble>
-          </At>
-          <At x={20} y={572}>
-            <Companion world={world} pose="waving" width={110} breathing reducedMotion={reduced} />
-          </At>
-          <At x={55} y={708} w={280} className="pop-in-3">
-            <PrimaryButton onClick={onReadyStart}>I&apos;m ready</PrimaryButton>
-          </At>
-          <At x={0} y={782} w={390} style={{ textAlign: "center" }}>
-            <TextButton
-              onClick={() => {
-                unlockAudio();
-                speak(voice, true);
-              }}
-            >
-              Hear the instructions
-            </TextButton>
-          </At>
-        </>
-      )}
+      <Scene variant={copy.scene} reducedMotion={reduced} />
 
       {/* ------------------------------ THE WATCH ------------------------------ */}
       {onWatchScreen && (
@@ -717,11 +733,16 @@ export function NightWatchGame() {
           </At>
           <At x={0} y={64} w={390} style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
             <Pips
-              filled={Math.min(10, Math.floor((progress * 10) / watchLength))}
-              partial={((progress * 10) / watchLength) % 1}
+              filled={Math.min(10, Math.floor((progress * 10) / progressTotal))}
+              partial={((progress * 10) / progressTotal) % 1}
+              label={progressMode === "practice" ? "Practice progress" : progressMode === "cooldown" ? "Just-for-fun progress" : "Watch progress"}
+              valueText={`${progress} of ${progressTotal} glows shown. Progress does not depend on catching them.`}
             />
           </At>
           <At x={322} y={56}>{soundButton}</At>
+          <At x={75} y={101} w={240} style={{ textAlign: "center", fontSize: "calc(11px * var(--text-scale))", lineHeight: 1.2, color: "var(--soft)" }}>
+            {progressMode === "practice" ? "Practice" : progressMode === "cooldown" ? "Just for fun" : "How far we’ve watched"}
+          </At>
 
           <At x={0} y={120} w={390} h={60} style={{ textAlign: "center", padding: "0 24px", display: "grid", placeItems: "center" }}>
             <div className="t-title" style={{ whiteSpace: "nowrap" }}>
@@ -798,114 +819,18 @@ export function NightWatchGame() {
         />
       )}
       {pause === "interrupted" && (
-        <PauseOverlay title="We paused for you." primary="Keep going" onPrimary={resume} />
+        <PauseOverlay title="We paused for you." primary="Keep going" onPrimary={resume} secondary="Rest for now" onSecondary={() => void stopForNow()} />
       )}
       {pause === "checkIn" && (
         <PauseOverlay
-          title="Still there?"
-          body={`A few ${copy.plural} glowed twice and went by. Want to keep watching, or rest for now? Either is fine.`}
+          title="A little rest?"
+          body="It’s okay to miss a glow. Keep watching if you like. If you don’t choose, we’ll save this visit and rest in a moment."
           primary="Keep watching"
           onPrimary={resume}
           secondary="Rest for now"
           onSecondary={() => void stopForNow()}
           testId="check-in"
         />
-      )}
-
-      {/* ---------------------------- COOLDOWN OFFER ---------------------------- */}
-      {phase === "offerCooldown" && (
-        <>
-          <At x={0} y={150} w={390} style={{ textAlign: "center", padding: "0 30px" }}>
-            <div className="t-title">A few more for fun?</div>
-            <div className="t-body" style={{ marginTop: 10 }}>These ones are just for watching.</div>
-          </At>
-          <At x={195} y={370} w={LIGHT_SIZE} h={LIGHT_SIZE} center>
-            <Light world={world} state="glow" intensity={1} size={LIGHT_SIZE} />
-          </At>
-          <At x={20} y={500}>
-            <Companion world={world} pose="waving" width={110} reducedMotion={reduced} />
-          </At>
-          <At x={55} y={640} w={280}>
-            <PrimaryButton onClick={startCooldown}>Keep watching</PrimaryButton>
-          </At>
-          <At x={55} y={716} w={280}>
-            <OutlineButton onClick={() => goPhase("done")}>Skip</OutlineButton>
-          </At>
-        </>
-      )}
-
-      {/* ------------------------------ ALL DONE ------------------------------ */}
-      {phase === "done" && (
-        <>
-          <At x={20} y={56}>
-            <IconButton icon="close" label="Close" onClick={() => router.push("/basecamp")} />
-          </At>
-          <At x={322} y={56}>{soundButton}</At>
-          {[
-            { x: 300, y: 210, s: 10 },
-            { x: 70, y: 260, s: 8 },
-            { x: 330, y: 330, s: 7 },
-            { x: 48, y: 400, s: 6 },
-            { x: 350, y: 450, s: 8 },
-          ].map((f, i) => (
-            <At key={i} x={f.x} y={f.y} w={f.s} h={f.s} center>
-              <span
-                aria-hidden
-                className={reduced ? undefined : "glow-pulse"}
-                style={{
-                  display: "block",
-                  width: f.s,
-                  height: f.s,
-                  borderRadius: 999,
-                  background: palette.cream,
-                  boxShadow: `0 0 ${f.s * 1.5}px ${palette.cream}99`,
-                  animationDelay: `${i * 0.5}s`,
-                }}
-              />
-            </At>
-          ))}
-          <At x={0} y={130} w={390} className="pop-in" style={{ textAlign: "center", padding: "0 30px" }}>
-            <div className="t-title-lg">Nice work showing up!</div>
-            <div className="t-body" style={{ marginTop: 10 }}>That&apos;s another check-in for your Basecamp.</div>
-          </At>
-          <At x={25} y={300} className="pop-in-2">
-            <RewardCard
-              icon={<RewardIcon id={NIGHT_WATCH_REWARD[world].id} size={64} />}
-              label="New for your Basecamp"
-              name={NIGHT_WATCH_REWARD[world].name}
-            />
-          </At>
-          <At x={0} y={436} w={390}>
-            <LockNote />
-          </At>
-          <At x={20} y={536}>
-            <Companion world={world} pose="celebrating" width={130} breathing reducedMotion={reduced} />
-          </At>
-          <At x={55} y={708} w={280} className="pop-in-3">
-            <PrimaryButton onClick={() => router.push("/basecamp")}>Back to Basecamp</PrimaryButton>
-          </At>
-          <At x={55} y={778} w={280}>
-            <OutlineButton onClick={() => router.push("/grown-ups")}>See my trends</OutlineButton>
-          </At>
-        </>
-      )}
-
-      {/* ----------------------------- STOPPED EARLY ----------------------------- */}
-      {phase === "stoppedEarly" && (
-        <>
-          <At x={0} y={200} w={390} style={{ textAlign: "center", padding: "0 30px" }}>
-            <div className="t-title-lg">That&apos;s okay.</div>
-            <div className="t-body" style={{ marginTop: 10 }}>
-              Watching is hard work. The {copy.plural} will be here whenever you are.
-            </div>
-          </At>
-          <At x={20} y={536}>
-            <Companion world={world} pose="idle" width={130} breathing reducedMotion={reduced} />
-          </At>
-          <At x={55} y={708} w={280}>
-            <PrimaryButton onClick={() => router.push("/basecamp")}>Back to Basecamp</PrimaryButton>
-          </At>
-        </>
       )}
 
       {saving && (
@@ -968,7 +893,7 @@ function Ring({ r, color, opacity }: { r: number; color: string; opacity: number
 }
 
 function OnceTwiceCard({ world, glow, button }: { world: WorldId; glow: string; button: string }) {
-  const cell = { display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 10, flex: 1 };
+  const cell = { display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 10, flex: 1, minWidth: 0 };
   const pic = { position: "relative" as const, width: 96, height: 96, display: "grid", placeItems: "center" };
   const label = {
     fontFamily: "var(--font-title)",
@@ -979,7 +904,7 @@ function OnceTwiceCard({ world, glow, button }: { world: WorldId; glow: string; 
     textAlign: "center" as const,
   };
   return (
-    <Card style={{ display: "flex", width: 310 }} padding="16px 12px">
+    <Card style={{ display: "flex", gap: 8, width: "100%", maxWidth: 310 }} padding="16px 12px">
       <div style={cell}>
         <div style={pic}>
           <Ring r={42} color={glow} opacity={0.55} />

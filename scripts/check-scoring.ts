@@ -4,6 +4,8 @@
  */
 import { classifyNightWatchTap, scoreFireflyTrail, scoreFireflyWatch, scoreNightWatch } from "../src/lib/scoring";
 import type { FireflyTrailSession, FireflyWatchSession, NightWatchSession, WatchEvent } from "../src/lib/types";
+import { WATCH_PROTOCOL_VERSION } from "../src/lib/forms/fireflyWatch";
+import { trendsFor } from "../src/lib/scoring/trends";
 
 let failures = 0;
 function expect(cond: boolean, msg: string) {
@@ -41,6 +43,19 @@ expect(ws.medianRtMs != null && ws.medianRtMs >= 250 && ws.medianRtMs <= 370, `m
 expect(ws.vsUsual === null, "no 'usual' until two earlier sessions exist");
 const ws2 = scoreFireflyWatch(watch, [ws, { ...ws, medianRtMs: 400 }]);
 expect(ws2.vsUsual != null && Math.abs(ws2.vsUsual - ws.medianRtMs! / ((ws.medianRtMs! + 400) / 2)) < 1e-9, "vsUsual compares to median of prior medians");
+const quickerWatch = { ...watch, protocolVersion: WATCH_PROTOCOL_VERSION };
+const quickerScore = scoreFireflyWatch(quickerWatch, [ws, ws2]);
+expect(quickerScore.vsUsual === null, "new firefly pace does not use earlier-pace baselines");
+const matchingPace = scoreFireflyWatch(quickerWatch, [ws, quickerScore, { ...quickerScore, medianRtMs: 400 }]);
+expect(matchingPace.vsUsual === ws2.vsUsual, "new pace uses only matching prior sessions");
+expect(trendsFor("fireflyWatch", [ws, ws2, quickerScore])[0].points.length === 1, "adult charts keep firefly pace versions separate");
+const repeatedStarts = scoreFireflyWatch({ ...watch, events: [
+  { ...events[2], outcome: "falseStart", falseStartsBefore: 1, reactionMs: null },
+  { ...events[2], outcome: "falseStart", falseStartsBefore: 2, reactionMs: null },
+  { ...events[2], outcome: "hit", falseStartsBefore: 2 },
+] }, []);
+expect(repeatedStarts.falseStarts === 2 && repeatedStarts.scoredEvents === 1,
+  "legacy cumulative early-press logs count two presses and one resolved turn");
 
 // ---- Firefly Trail ----
 const trail: FireflyTrailSession = {
@@ -61,6 +76,13 @@ expect(ts.anchorPerfect === 2, "2 of 4 anchors perfect");
 expect(ts.anchorStonesCorrect === 10 && ts.anchorStonesTotal === 14, "10 of 14 anchor stones in place");
 expect(ts.span === 5, "span ignores practice and cooldown (5)");
 expect(ts.medianTapGapMs === 500, "median tap gap 500 ms");
+const partialTrail = scoreFireflyTrail({ ...trail, events: [
+  { ...trail.events[3], taps: trail.events[3].taps.slice(0, 3), perfect: false, correctPositions: 3 },
+  { ...trail.events[4], taps: [], perfect: false, correctPositions: 0 },
+] }, []);
+expect(partialTrail.anchorPerfect === 0 && partialTrail.anchorStonesCorrect === 3 && partialTrail.anchorStonesTotal === 8,
+  "partial and empty Done submissions preserve missing stones instead of inventing guesses");
+expect(partialTrail.span === 0, "partial Done submissions never count as perfect recall");
 
 // ---- Night Watch ----
 const interval = 1500;
@@ -98,6 +120,15 @@ const tooEarly = classifyNightWatchTap(11 * interval + 550 + 50, glows, interval
 expect(tooEarly != null && !tooEarly.hit, "a tap < 100 ms after the second glow is not a hit");
 const firstHalf = classifyNightWatchTap(17 * interval + 200, glows, interval);
 expect(firstHalf != null && !firstHalf.hit, "a tap during a double's first glow is a false alarm");
+for (const pace of [1500, 2100]) {
+  const finalDouble = [{ index: 89, kind: "double" as const, firstDrawnMs: 1000, secondDrawnMs: 1550 }];
+  const late = classifyNightWatchTap(1000 + pace + 299, finalDouble, pace);
+  expect(late?.hit === true && late.glowIndex === 0, `last double retains its full grace window at ${pace} ms pace`);
+  expect(classifyNightWatchTap(1000 + pace + 300, finalDouble, pace) === null,
+    `last double rejects taps at and beyond the closing boundary at ${pace} ms pace`);
+  const finalSingle = [{ ...finalDouble[0], kind: "single" as const, secondDrawnMs: null }];
+  expect(classifyNightWatchTap(1000 + pace + 100, finalSingle, pace) === null, "a final single receives no extra response window");
+}
 
 console.log(failures ? `\n${failures} failure(s)` : "\nScoring checks pass.");
 process.exit(failures ? 1 : 0);

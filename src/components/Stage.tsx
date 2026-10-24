@@ -1,52 +1,55 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { STAGE_H, STAGE_W } from "@/lib/theme";
 
 /**
- * Every screen is laid out on a fixed 390 x 844 dp canvas and the whole
- * canvas is scaled to fit the viewport. Positions therefore stay identical
- * on every device, which the measurement depends on.
+ * Games keep their fixed reference canvas. Menus use normal document flow
+ * so shorter screens and larger text can scroll instead of shrinking.
  */
-export function Stage({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+export function Stage({ children, style, scrollable = false }: { children: ReactNode; style?: CSSProperties; scrollable?: boolean }) {
+  const viewport = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
+    if (scrollable || !viewport.current) return;
+    const area = viewport.current;
     function fit() {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const s = Math.min(vw / STAGE_W, vh / STAGE_H);
-      setScale(s);
-      setOffset({ x: (vw - STAGE_W * s) / 2, y: (vh - STAGE_H * s) / 2 });
+      setScale(Math.min(area.clientWidth / STAGE_W, area.clientHeight / STAGE_H));
     }
     fit();
-    window.addEventListener("resize", fit);
-    window.visualViewport?.addEventListener("resize", fit);
-    return () => {
-      window.removeEventListener("resize", fit);
-      window.visualViewport?.removeEventListener("resize", fit);
-    };
-  }, []);
+    const observer = new ResizeObserver(fit);
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, [scrollable]);
+
+  if (scrollable) {
+    return (
+      <div className="app-stage app-stage--scrollable">
+        <div className="app-stage__flow" style={style}>{children}</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-night">
+    <div className="app-stage">
+      <div ref={viewport} className="app-stage__viewport">
       <div
+        className="app-stage__canvas"
         style={{
           position: "absolute",
-          left: offset.x,
-          top: offset.y,
+          left: "50%",
+          top: "50%",
           width: STAGE_W,
           height: STAGE_H,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
+          transform: `translate(-50%, -50%) scale(${scale})`,
+          transformOrigin: "center",
           overflow: "hidden",
-          borderRadius: scale < 1 ? 28 : 0,
-          boxShadow: scale < 1 ? "0 30px 80px rgba(0,0,0,0.45)" : undefined,
           ...style,
         }}
       >
         {children}
+      </div>
       </div>
     </div>
   );

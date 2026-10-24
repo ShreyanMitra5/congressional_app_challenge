@@ -1,6 +1,6 @@
 # NeuroTrace Basecamp
 
-Three calm, storybook-night games for children that measure cognition without ever feeling like a test. Built from the game design document, mobile-first on a fixed 390 × 844 dp reference canvas that scales to any screen.
+Three calm, storybook-night games for children that measure cognition without ever feeling like a test. Menus and game introductions use responsive, scrollable layouts. Measured gameplay stays on a fixed 390 × 844 dp reference canvas that scales to fit the screen's safe area.
 
 | # | Game | Task it is built on | What it measures (never shown to the child) |
 |---|------|---------------------|---------------------------------------------|
@@ -16,6 +16,9 @@ npm run dev        # http://localhost:3000
 npm run build      # production build
 npx tsx scripts/check-forms.ts    # verifies every stored session list against the design rules
 npx tsx scripts/check-scoring.ts  # self-checks the scoring engine on synthetic logs
+npx tsx scripts/check-watch-progress.ts # catch, timeout, and pause/resume regressions
+npx tsx scripts/check-trail-response.ts # empty, partial, and complete Done responses
+npx tsx scripts/check-night-watch.ts # fixed-length runs and response-window boundaries
 ```
 
 Art preview pages (for review only): `/dev/skins`, `/dev/fox`, `/dev/companions`, `/dev/scenes`, `/dev/ui`.
@@ -32,10 +35,11 @@ Art preview pages (for review only): `/dev/skins`, `/dev/fox`, `/dev/companions`
 
 ## How the measurement stays honest
 
-- **Fixed lists, never run-time randomness.** Firefly Watch uses three matched 30-wait forms (same 1.0–3.6 s wait set, seeded order; the pace never changes within a session). Firefly Trail uses three matched anchor forms (3, 3, 4, 4) and a seeded generator for adaptive trails. Night Watch uses three hand-checked 90-glow forms (81 single, 9 double; 2/3/2/2 per quarter; 4–20 glows between doubles; no light twice in a row; no light carries more than two doubles). Forms rotate by session number; the form id and seed are stored with every session. `scripts/check-forms.ts` enforces all of this.
+- **Fixed lists, never run-time randomness.** Firefly Watch uses three matched 30-wait forms (same 1.0–3.2 s wait set, seeded order; the pace never changes within a session). Fireflies appear across six safe positions in a seeded order, with no consecutive repeats and equal use of each position in scored play. Retrying an interrupted turn preserves its spot. The wait and position rules have a saved protocol version; earlier fixed-position sessions stay in history but are not mixed into the new baseline or charts. Firefly Trail uses three matched anchor forms (3, 3, 4, 4) and a seeded generator for adaptive trails. Night Watch uses three hand-checked 90-glow forms (81 single, 9 double; 2/3/2/2 per quarter; 4–20 glows between doubles; no light twice in a row; no light carries more than two doubles). Forms rotate by session number; the form id and seed are stored with every session. `scripts/check-forms.ts` enforces all of this.
 - **Timestamps from the right clocks.** Stimulus onset is the time the frame was actually presented (double `requestAnimationFrame`). Taps use the pointer event's own `timeStamp`, not when handler code ran.
-- **Keeping a child with the game, without judging them.** Firefly Watch lights one bead on the strip for every catch, the moment it happens (a float-away leaves a dim bead, so the strip always ends full). Firefly Trail has a Done button so a child who remembers three of four stones is never stuck waiting for a fourth tap. In every game, going quiet earns a gentle reminder from the companion (two float-aways / 8 s idle / two untouched doubles) and then a "Still there?" pause that offers *keep going* or *rest for now* (four float-aways / 22 s idle / four untouched doubles). Nudges and check-ins are counted on the session and shown on the grown-ups page; they never change the stimulus list. Night Watch also has a *short watch* setting (the first 45 glows of the form) for a child who cannot yet sit a full one; it is recorded on the session like gentle pace.
-- **Interruptions.** Backgrounding, focus loss, or rotation pauses everything at once. Firefly Watch and Firefly Trail drop the event in flight and give it a new wait. Night Watch marks the glow in flight and the next three as invalid and carries on from the list without restarting.
+- **Clear progress, without a success requirement.** Firefly Watch records a bright bead immediately for a catch and a soft bead for a float-away; neither pausing nor animation can erase the result. Its two practice turns are labelled separately. Firefly Trail always waits for **Done**, which accepts empty, partial, and complete answers without filling in guesses. Its lights show trails finished. Night Watch's lights show glows shown, regardless of taps; one practice pass opens the watch, even with no hits. All activities can finish without perfect answers and offer supportive endings.
+- **A gentle way to rest.** Going quiet earns a reminder (two float-aways / 8 s idle / two untouched doubles), then a check-in (four float-aways / 22 s idle / four untouched doubles). Choose to continue or rest; leaving the check-in unanswered for 30 s saves an incomplete visit and opens the rest screen. Manual and interruption pauses remain under the user's control. Trail check-ins preserve the stones already entered. Nudges and check-ins are recorded for grown-ups. Night Watch also offers a *short watch* (45 glows) and gentle pace, both recorded on the session.
+- **Interruptions.** Backgrounding, focus loss, or rotation pauses play. Firefly Watch retries an unresolved firefly but moves past one already recorded. Firefly Trail replays an interrupted presentation/response; a gentle inactivity check-in preserves the current response. Night Watch marks the glow in flight and the next three as invalid and carries on from the list without restarting. Its final double keeps the full response window, including the 300 ms grace after the last slot.
 - **Encrypted local storage.** Sessions, scores, and rewards are AES-GCM encrypted with a non-extractable device key held only in IndexedDB. Nothing leaves the device. Delete one session or everything from the app.
 - **Scoring engine** (`src/lib/scoring`) is pure and offline; the trend is ready well inside the 2-second budget. Every measure is labelled *experimental* until test-retest ICC reaches 0.70 and is excluded from any composite.
 - **Never:** reaction times, points, ranks, streaks, red marks, green ticks, or the words score / test / wrong / fail / fast / slow / win / lose anywhere the child can see. No flashing above 3 Hz, no red flashes, no sound or text change when a stimulus appears, no difficulty change in scored events, no licensed characters.
@@ -46,7 +50,7 @@ Art preview pages (for review only): `/dev/skins`, `/dev/fox`, `/dev/companions`
 src/
   app/                  routes (App Router); each page renders one client screen
   components/
-    Stage.tsx           390×844 canvas scaled to fit; `At` positions children in dp
+    Stage.tsx           scrollable menus or a 390×844 game canvas; `At` positions game elements in dp
     ui/                 buttons, chip, pips, speech bubble, reward card, big circle button, overlay
     art/                all original vector art: scenes, Fox, Otter, Lynx, six skins, stones, lights, rewards
   games/
@@ -72,11 +76,31 @@ scripts/
 
 Every value marked TUNE in the design doc lives in `src/lib/forms/*.ts` as a named constant (`WATCH_TIMING`, `TRAIL_TIMING`, `NIGHT_WATCH_TIMING`). Change them there, never in a game file.
 
+## iPhone and iPad app
+
+The `ios/` folder is a Capacitor 8 native app with bundled Next.js screens, fonts, and artwork. It opens at Basecamp and works without a web server or an internet connection. Session history stays on the device. The website and native app have separate local storage.
+
+Requirements: macOS, Xcode 26 or newer, Node.js 22 or newer. The app targets iOS/iPadOS 16.4 and newer. iPhone uses portrait; iPad supports portrait and landscape.
+
+```bash
+npm ci
+npm run ios:sync  # build the offline screens and copy them into Xcode
+npm run ios:open  # open ios/App/App.xcodeproj
+```
+
+In Xcode, choose the **App** scheme and an iPhone/iPad simulator, then Run. For a physical device, choose your Apple development team under **Signing & Capabilities**, keep automatic signing enabled, connect your device, select it, and Run. The starter bundle identifier is `com.neurotrace.basecamp`; change it in both `capacitor.config.ts` and the Xcode target if your team needs a different identifier. Personal signing settings are not stored in the repository.
+
+For a release archive, select **Any iOS Device** and use **Product → Archive**. An unsigned archive cannot be installed on a phone; distribution requires a matching signing profile. No App Store or TestFlight upload is performed by these scripts.
+
+Every web-code update needs `npm run ios:sync` before rebuilding in Xcode. Native builds use a static export in `out/`; `npm run build` remains the normal website build. Both build modes use `.next/`, so stop a running production web server before switching modes, then rebuild it normally before `npm start`.
+
+The native route handler serves each exported route's `index.html`, including cold launches, and preserves Next's navigation payloads. The app pauses on native background events. Keep the default `capacitor://localhost` origin unchanged so existing local history remains accessible. Simulator builds must use Xcode's normal local signing (do not disable signing), because WebKit needs the app identifier to persist its encryption key.
+
 ## Known gaps
 
 - Voice instructions use the device's speech synthesis with the locked script; swap in the recorded clips in `src/lib/audio.ts` when they land.
 - The scoring engine is a local stand-in with the same event-log format; point `finishSession` at the real engine when it is ready.
-- No service worker yet, so the app needs one online load before it works offline.
+- The website has no service worker and does not guarantee offline use. The native iOS app bundles everything needed to play offline; spoken instructions depend on voices installed on the device.
 
 ## Deploying
 

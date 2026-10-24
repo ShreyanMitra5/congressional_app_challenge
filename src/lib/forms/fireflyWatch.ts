@@ -1,18 +1,50 @@
 /**
  * Firefly Watch wait lists. Three matched forms: every form uses the same 30
- * wait values (1.0 to 3.6 s, evenly covering the range so medians match
+ * wait values (1.0 to 3.2 s, evenly covering the range so medians match
  * exactly) in a different, seeded order. The same seed always gives the same
  * waits.
  *
- * The range was 1.0 to 5.0 s in the first build; it was shortened after
- * clinician feedback that children with attention difficulties were checking
- * out between fireflies. The pace is fixed for the whole session (it never
- * speeds up as the child progresses) so reaction times stay comparable.
+ * This protocol shortens the previous 1.0–3.6 s range slightly. The pace is
+ * fixed throughout a session; it never speeds up after successful catches.
+ * Session protocol versions keep comparisons within the same timing rules.
  */
 import { mulberry32 } from "@/lib/rng";
 
 export const WATCH_MIN_WAIT_MS = 1000;
-export const WATCH_MAX_WAIT_MS = 3600;
+export const WATCH_MAX_WAIT_MS = 3200;
+export const WATCH_LEGACY_PROTOCOL_VERSION = "watch-v1-3.6s";
+export const WATCH_FIXED_POSITION_PROTOCOL_VERSION = "watch-v2-3.2s";
+export const WATCH_PROTOCOL_VERSION = "watch-v3-varied-positions";
+
+/** Safe sprite centres on the 390 × 844 canvas, below instructions and above the fox/buttons. */
+export const WATCH_POSITIONS = [
+  { x: 90, y: 370 }, { x: 195, y: 370 }, { x: 300, y: 370 },
+  { x: 90, y: 460 }, { x: 195, y: 460 }, { x: 300, y: 460 },
+] as const;
+
+/** Practice first, then five balanced passes through the six spots; never repeat a spot consecutively. */
+export function positionsForSeed(seed: number): (typeof WATCH_POSITIONS)[number][] {
+  const rand = mulberry32(seed ^ 0x70a17e);
+  let previous = -1;
+  function shuffledPass() {
+    const order = WATCH_POSITIONS.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    if (order[0] === previous) [order[0], order[1]] = [order[1], order[0]];
+    return order;
+  }
+  const practice = shuffledPass().slice(0, WATCH_TIMING.practiceEvents);
+  previous = practice.at(-1)!;
+  const order = [...practice];
+  while (order.length < WATCH_TIMING.practiceEvents + WATCH_TIMING.scoredEvents) {
+    const pass = shuffledPass();
+    order.push(...pass);
+    previous = pass.at(-1)!;
+  }
+  return order.slice(0, WATCH_TIMING.practiceEvents + WATCH_TIMING.scoredEvents).map((i) => WATCH_POSITIONS[i]);
+}
 
 export const WATCH_BASE_WAITS_MS: number[] = Array.from({ length: 30 }, (_, i) =>
   Math.round(WATCH_MIN_WAIT_MS + (i * (WATCH_MAX_WAIT_MS - WATCH_MIN_WAIT_MS)) / 29),
@@ -52,6 +84,8 @@ export const WATCH_TIMING = {
   practiceEvents: 2,
   timeoutMs: 2500,
   maxFalseStarts: 10,
+  /** Practice always moves on, even if a child keeps tapping before the glow. */
+  maxPracticeFalseStarts: 3,
   catchGlowMs: 380,
   oopsBubbleMs: 950,
   timeoutDriftMs: 800,
@@ -64,6 +98,8 @@ export const WATCH_TIMING = {
   nudgeAfterTimeouts: 2,
   /** after this many in a row, the game pauses and asks if the child wants to keep going */
   checkInAfterTimeouts: 4,
+  /** An unanswered check-in ends gently instead of leaving the session open. */
+  checkInRestMs: 30_000,
   /** how long the flying spark takes to reach its bead on the strip */
   sparkFlyMs: 520,
 } as const;

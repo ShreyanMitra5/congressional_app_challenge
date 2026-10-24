@@ -19,6 +19,7 @@ import type {
   WatchScore,
 } from "@/lib/types";
 import { NIGHT_WATCH_TIMING } from "@/lib/forms/nightWatch";
+import { WATCH_LEGACY_PROTOCOL_VERSION } from "@/lib/forms/fireflyWatch";
 
 const EXPERIMENTAL: Reliability = {
   status: "experimental",
@@ -33,19 +34,34 @@ function usual(values: (number | null)[]): number | null {
 }
 
 export function scoreFireflyWatch(session: FireflyWatchSession, prior: WatchScore[]): WatchScore {
-  const scored = session.events.filter((e) => !e.practice);
+  const attempts = session.events.filter((e) => !e.practice);
+  const scored = attempts.filter((e) => e.outcome !== "falseStart");
   const hits = scored.filter((e) => e.outcome === "hit" && e.reactionMs != null);
   // Reaction times under 100 ms are anticipations, not reactions (standard PVT rule).
   const rts = hits.map((e) => e.reactionMs as number).filter((rt) => rt >= 100);
   const med = median(rts);
   const mean = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
   const lapses = scored.filter((e) => e.outcome === "timeout").length;
-  const falseStarts = scored.reduce((n, e) => n + e.falseStartsBefore, 0);
-  const priorMedians = prior.map((p) => p.medianRtMs);
+  // Older logs repeat cumulative retry counts on each early press and again
+  // on the resolved turn. Count presses once, with metadata as a fallback for
+  // imported logs that contain only the final outcome.
+  const earlyByTurn = new Map<number, { presses: number; recorded: number }>();
+  for (const event of attempts) {
+    const counts = earlyByTurn.get(event.index) ?? { presses: 0, recorded: 0 };
+    if (event.outcome === "falseStart") counts.presses += 1;
+    counts.recorded = Math.max(counts.recorded, event.falseStartsBefore);
+    earlyByTurn.set(event.index, counts);
+  }
+  const falseStarts = [...earlyByTurn.values()].reduce((n, e) => n + Math.max(e.presses, e.recorded), 0);
+  const protocolVersion = session.protocolVersion ?? WATCH_LEGACY_PROTOCOL_VERSION;
+  const priorMedians = prior
+    .filter((p) => (p.protocolVersion ?? WATCH_LEGACY_PROTOCOL_VERSION) === protocolVersion)
+    .map((p) => p.medianRtMs);
   const u = usual(priorMedians);
   return {
     game: "fireflyWatch",
     sessionId: session.id,
+    protocolVersion,
     at: session.endedAt,
     medianRtMs: med,
     meanRtMs: mean,
@@ -157,7 +173,11 @@ export function classifyNightWatchTap(
   for (let i = 0; i < glows.length; i++) {
     const g = glows[i];
     if (g.firstDrawnMs == null) break;
-    const next = glows[i + 1]?.firstDrawnMs ?? g.firstDrawnMs + intervalMs;
+    const nextDrawn = glows[i + 1]?.firstDrawnMs;
+    // The last double still receives the same 300 ms grace as other doubles,
+    // even when no next glow is drawn (including at the end of a short watch).
+    const grace = i === glows.length - 1 && g.kind === "double" ? NIGHT_WATCH_TIMING.hitWindowMaxAfterNextMs : 0;
+    const next = nextDrawn ?? g.firstDrawnMs + intervalMs + grace;
     if (tapMs >= g.firstDrawnMs && tapMs < next) {
       target = i;
       break;

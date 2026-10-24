@@ -15,13 +15,11 @@ import { Stage } from "@/components/Stage";
 import { amberEdge, Card, Chip, IconButton, ink, inkSoft, LockNote, OutlineButton, tan, tanEdge, TextButton } from "@/components/ui";
 import { deleteSession, listScores, listSessions } from "@/lib/db";
 import { trendsFor, type TrendSeries } from "@/lib/scoring/trends";
+import { WATCH_FIXED_POSITION_PROTOCOL_VERSION, WATCH_LEGACY_PROTOCOL_VERSION, WATCH_PROTOCOL_VERSION } from "@/lib/forms/fireflyWatch";
 import { palette } from "@/lib/theme";
 import { GAME_ORDER, GAME_TITLES, type GameId, type Score, type Session } from "@/lib/types";
 
 const HOLD_MS = 3000;
-const TABS_TOP = 116;
-const TABS_H = 56;
-const TOP_BAR_H = TABS_TOP + TABS_H + 16;
 
 const DEFAULT_RELIABILITY_NOTE =
   "Experimental — labelled until test-retest reliability reaches ICC 0.70; not used in any composite.";
@@ -31,7 +29,7 @@ const CHART = {
   line: "#C9780E",
   marker: "#FFC145",
   markerRing: "#FFF6E0",
-  tick: "#C9B382",
+  tick: "#75694F",
   usual: "#5B5478",
 };
 
@@ -151,7 +149,10 @@ function HoldButton({ onDone }: { onDone: () => void }) {
       style={{
         position: "relative",
         width: 280,
-        height: 64,
+        maxWidth: "100%",
+        minHeight: 64,
+        padding: "14px 20px",
+        lineHeight: 1.2,
         borderRadius: 999,
         overflow: "hidden",
         background: palette.cream,
@@ -186,39 +187,38 @@ function HoldButton({ onDone }: { onDone: () => void }) {
 
 function Gate({ onOpen, onBack }: { onOpen: () => void; onBack: () => void }) {
   return (
-    <>
-      <div style={{ position: "absolute", left: 20, top: 56 }}>
+    <div style={{ padding: "24px 20px 32px" }}>
+      <header>
         <IconButton icon="back" label="Back to Basecamp" onClick={onBack} />
-      </div>
+      </header>
       <div
         style={{
-          position: "absolute",
-          inset: 0,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          justifyContent: "center",
-          gap: 18,
+          gap: 20,
           textAlign: "center",
-          padding: "0 32px 160px",
+          padding: "36px 0 32px",
+          maxWidth: 350,
+          margin: "0 auto",
         }}
       >
-        <div className="t-title">For grown-ups</div>
-        <div className="t-body">Hold the button for 3 seconds</div>
-        <div style={{ marginTop: 8 }}>
+        <div aria-hidden>
+          <Fox pose="idle" width={120} />
+        </div>
+        <h1 className="t-title" style={{ margin: 0, textWrap: "balance" }}>For <span style={{ whiteSpace: "nowrap" }}>grown-ups</span></h1>
+        <div className="t-body">Hold the button for 3 seconds to see your child&apos;s trends.</div>
+        <div style={{ marginTop: 8, width: "100%" }}>
           <HoldButton onDone={onOpen} />
         </div>
-        <div className="t-note" style={{ marginTop: 20 }}>
+        <div className="t-note" style={{ marginTop: 8 }}>
           This page shows numbers. The child never sees them.
         </div>
       </div>
-      <div style={{ position: "absolute", left: 20, top: 600 }} aria-hidden>
-        <Fox pose="idle" width={120} />
-      </div>
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 40 }}>
+      <div style={{ textAlign: "center", maxWidth: 350, margin: "0 auto" }}>
         <LockNote text="Saved only on this device. Nothing is sent anywhere." />
       </div>
-    </>
+    </div>
   );
 }
 
@@ -311,7 +311,7 @@ function TrendChart({ series }: { series: TrendSeries }) {
         width={CHART_W}
         height={CHART_H}
         viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-        style={{ display: "block", touchAction: "pan-y", overflow: "visible" }}
+        style={{ display: "block", width: "100%", height: "auto", touchAction: "pan-y", overflow: "visible" }}
         onPointerMove={(e) => pick(e.clientX)}
         onPointerDown={(e) => pick(e.clientX)}
         onPointerLeave={() => setHover(null)}
@@ -416,7 +416,7 @@ function SeriesCard({ series }: { series: TrendSeries }) {
         <div className="t-body-cream" style={{ color: ink }}>{series.label}</div>
         {last ? (
           <>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8, marginTop: 4 }}>
               <span className="t-title" style={{ fontSize: "calc(34px * var(--text-scale))", color: ink, textShadow: "none" }}>
                 {Math.round(last.value).toLocaleString()}
               </span>
@@ -444,7 +444,7 @@ function ReliabilityCard({ note }: { note: string }) {
   return (
     <section aria-label="Reliability">
       <Card tone="navy" padding={CARD_PAD}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span className="t-body-cream">Reliability</span>
           <Chip tone="pink" tilt={-3}>Experimental</Chip>
         </div>
@@ -473,6 +473,11 @@ function SessionRow({
         <div className="t-body-cream" style={{ color: ink }}>{fmtDateTime(session.endedAt || session.startedAt)}</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
           <Chip tone="cream" tilt={0} style={smallChip}>Form {session.formId}</Chip>
+          {session.game === "fireflyWatch" && (
+            <Chip tone="cream" tilt={0} style={smallChip}>
+              {session.protocolVersion === WATCH_PROTOCOL_VERSION ? "Varied positions" : session.protocolVersion === WATCH_FIXED_POSITION_PROTOCOL_VERSION ? "Fixed position · quicker pace" : "Earlier pace"}
+            </Chip>
+          )}
           {session.completed ? (
             <Chip tone="mint" tilt={0} style={smallChip}>Completed</Chip>
           ) : (
@@ -494,7 +499,7 @@ function SessionRow({
         {excluded && "exclusionReason" in session && session.exclusionReason && (
           <div className="t-note" style={{ marginTop: 8, color: inkSoft }}>{session.exclusionReason}</div>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 6, marginRight: -16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 6 }}>
           {confirming ? (
             <>
               <TextButton style={onCreamText} onClick={() => setConfirming(false)}>
@@ -567,9 +572,12 @@ function GameTab({
   const note = latestScore?.reliability?.note || DEFAULT_RELIABILITY_NOTE;
 
   const hasAnything = gameScores.length > 0 || gameSessions.length > 0;
+  const hasDifferentWatchPaces = game === "fireflyWatch" && new Set(
+    gameScores.filter((s) => s.game === "fireflyWatch").map((s) => s.protocolVersion ?? WATCH_LEGACY_PROTOCOL_VERSION),
+  ).size > 1;
 
   return (
-    <div role="tabpanel" id={`panel-${game}`} aria-labelledby={`tab-${game}`} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div role="tabpanel" tabIndex={0} id={`panel-${game}`} aria-labelledby={`tab-${game}`} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!hasAnything ? (
         <section>
           <NoteCard
@@ -583,6 +591,12 @@ function GameTab({
             <section>
               <NoteCard title={`No scored check-ins yet for ${title}.`} body="Saved sessions are listed below." />
             </section>
+          )}
+          {hasDifferentWatchPaces && (
+            <NoteCard
+              title="Updated firefly play"
+              body="Charts compare sessions with the same pace and position rules as the latest visit. Earlier sessions are still listed below, with their reaction times kept separate."
+            />
           )}
           {gameScores.length > 0 && series.map((s) => <SeriesCard key={s.key} series={s} />)}
         </>
@@ -608,7 +622,76 @@ function GameTab({
   );
 }
 
+function GameTabs({ game, onChange }: { game: GameId; onChange: (game: GameId) => void }) {
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Game"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+        gap: 4,
+        padding: 5,
+        borderRadius: 22,
+        background: palette.cream,
+        border: `3px solid ${tan}`,
+        boxShadow: `0 5px 0 ${tanEdge}`,
+      }}
+    >
+      {GAME_ORDER.map((g, index) => {
+        const selected = g === game;
+        return (
+          <button
+            key={g}
+            ref={(element) => { tabs.current[index] = element; }}
+            type="button"
+            role="tab"
+            id={`tab-${g}`}
+            aria-selected={selected}
+            aria-controls={`panel-${g}`}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(g)}
+            onKeyDown={(event) => {
+              let next: number;
+              if (event.key === "ArrowRight") next = (index + 1) % GAME_ORDER.length;
+              else if (event.key === "ArrowLeft") next = (index + GAME_ORDER.length - 1) % GAME_ORDER.length;
+              else if (event.key === "Home") next = 0;
+              else if (event.key === "End") next = GAME_ORDER.length - 1;
+              else return;
+              event.preventDefault();
+              onChange(GAME_ORDER[next]);
+              tabs.current[next]?.focus();
+            }}
+            style={{
+              minWidth: 0,
+              minHeight: 62,
+              borderRadius: 16,
+              border: "none",
+              background: selected ? palette.glow : "transparent",
+              boxShadow: selected ? `0 3px 0 ${amberEdge}` : "none",
+              color: ink,
+              fontFamily: "var(--font-title)",
+              fontSize: "calc(15px * var(--text-scale))",
+              fontWeight: 700,
+              lineHeight: 1.2,
+              padding: "10px 6px",
+              whiteSpace: "normal",
+              overflowWrap: "anywhere",
+              transition: "background 120ms ease, box-shadow 120ms ease",
+            }}
+          >
+            {GAME_TITLES[g]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Trends({ onBack }: { onBack: () => void }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [game, setGame] = useState<GameId>("fireflyWatch");
   const [state, setState] = useState<LoadState>("loading");
   const [scores, setScores] = useState<Score[]>([]);
@@ -616,6 +699,14 @@ function Trends({ onBack }: { onBack: () => void }) {
 
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  useEffect(() => {
+    const heading = headingRef.current;
+    if (!heading) return;
+    const viewport = heading.closest<HTMLElement>(".app-stage--scrollable");
+    if (viewport) viewport.scrollTop = 0;
+    heading.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -650,20 +741,15 @@ function Trends({ onBack }: { onBack: () => void }) {
   );
 
   return (
-    <>
-      {/* scrolling content, under the fixed top bar */}
+    <div style={{ padding: "24px 20px 40px" }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+        <IconButton icon="back" label="Back to Basecamp" onClick={onBack} />
+        <h1 ref={headingRef} tabIndex={-1} className="t-title" style={{ margin: 0, fontSize: "calc(30px * var(--text-scale))", textWrap: "balance" }}>For <span style={{ whiteSpace: "nowrap" }}>grown-ups</span></h1>
+      </header>
+      <GameTabs game={game} onChange={setGame} />
       <div
         style={{
-          position: "absolute",
-          inset: 0,
-          overflowY: "auto",
-          overflowX: "hidden",
-          paddingTop: TOP_BAR_H,
-          paddingBottom: 48,
-          paddingLeft: 20,
-          paddingRight: 20,
-          touchAction: "pan-y",
-          WebkitOverflowScrolling: "touch",
+          paddingTop: 24,
           userSelect: "text",
           WebkitUserSelect: "text",
         }}
@@ -698,79 +784,7 @@ function Trends({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
-      {/* fixed top bar */}
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          top: 0,
-          height: TOP_BAR_H,
-          background: "var(--night)",
-        }}
-      >
-        <div style={{ position: "absolute", left: 20, top: 56 }}>
-          <IconButton icon="back" label="Back to Basecamp" onClick={onBack} />
-        </div>
-        <div style={{ position: "absolute", left: 72, right: 72, top: 56, height: 48, display: "grid", placeItems: "center" }}>
-          <div className="t-title" style={{ fontSize: "calc(26px * var(--text-scale))" }}>For grown-ups</div>
-        </div>
-        <div
-          role="tablist"
-          aria-label="Game"
-          style={{
-            position: "absolute",
-            left: 20,
-            right: 20,
-            top: TABS_TOP,
-            height: TABS_H,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: 4,
-            padding: 3,
-            borderRadius: 999,
-            background: palette.cream,
-            border: `3px solid ${tan}`,
-            boxShadow: `0 5px 0 ${tanEdge}`,
-          }}
-        >
-          {GAME_ORDER.map((g) => {
-            const selected = g === game;
-            return (
-              <button
-                key={g}
-                type="button"
-                role="tab"
-                id={`tab-${g}`}
-                aria-selected={selected}
-                aria-controls={`panel-${g}`}
-                onClick={() => setGame(g)}
-                style={{
-                  minHeight: 44,
-                  height: "100%",
-                  borderRadius: 999,
-                  border: "none",
-                  background: selected ? palette.glow : "transparent",
-                  boxShadow: selected ? `0 3px 0 ${amberEdge}` : "none",
-                  color: ink,
-                  fontFamily: "var(--font-title)",
-                  fontSize: "calc(15px * var(--text-scale))",
-                  fontWeight: 700,
-                  lineHeight: 1,
-                  padding: "0 6px",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  transition: "background 120ms ease, box-shadow 120ms ease",
-                }}
-              >
-                {GAME_TITLES[g]}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
 
@@ -784,7 +798,7 @@ export function GrownUps() {
   const back = useCallback(() => router.push("/basecamp"), [router]);
 
   return (
-    <Stage>
+    <Stage scrollable>
       {open ? <Trends onBack={back} /> : <Gate onOpen={() => setOpen(true)} onBack={back} />}
     </Stage>
   );

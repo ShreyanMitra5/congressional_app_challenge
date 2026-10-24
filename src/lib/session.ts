@@ -6,6 +6,8 @@
  * the session to the encrypted store, scores it, and records the reward.
  */
 import { useEffect, useRef } from "react";
+import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import { listScores, saveReward, saveScore, saveSession } from "@/lib/db";
 import { scoreSession } from "@/lib/scoring";
 import { uuid } from "@/lib/rng";
@@ -68,20 +70,37 @@ export function useInterruption(onInterrupt: () => void, active: boolean) {
   });
   useEffect(() => {
     if (!active) return;
-    const vis = () => {
-      if (document.visibilityState === "hidden") cb.current();
+    let disposed = false;
+    let interrupted = false;
+    const interrupt = () => {
+      // Native and DOM events can describe the same interruption. Pause once
+      // until the game resumes and this active subscription is established again.
+      if (disposed || interrupted) return;
+      interrupted = true;
+      cb.current();
     };
-    const blur = () => cb.current();
-    const orient = () => cb.current();
+    const vis = () => {
+      if (document.visibilityState === "hidden") interrupt();
+    };
+    const blur = () => interrupt();
+    const orient = () => interrupt();
     document.addEventListener("visibilitychange", vis);
     window.addEventListener("blur", blur);
     window.addEventListener("orientationchange", orient);
     screen.orientation?.addEventListener?.("change", orient);
+    const nativeListener = Capacitor.isNativePlatform()
+      ? App.addListener("appStateChange", ({ isActive }) => {
+          if (!isActive) interrupt();
+        }).catch(() => null)
+      : null;
     return () => {
+      disposed = true;
       document.removeEventListener("visibilitychange", vis);
       window.removeEventListener("blur", blur);
       window.removeEventListener("orientationchange", orient);
       screen.orientation?.removeEventListener?.("change", orient);
+      // Registration may still be pending when React unmounts this effect.
+      void nativeListener?.then((listener) => listener?.remove()).catch(() => {});
     };
   }, [active]);
 }

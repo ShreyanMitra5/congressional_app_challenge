@@ -1,4 +1,5 @@
 import type { GameId, NightWatchScore, Score, TrailScore, WatchScore } from "@/lib/types";
+import { WATCH_LEGACY_PROTOCOL_VERSION } from "@/lib/forms/fireflyWatch";
 
 export interface TrendPoint {
   at: string;
@@ -36,7 +37,9 @@ function series(
 
 export function trendsFor(game: GameId, scores: Score[]): TrendSeries[] {
   if (game === "fireflyWatch") {
-    const s = scores.filter((x): x is WatchScore => x.game === "fireflyWatch");
+    const all = scores.filter((x): x is WatchScore => x.game === "fireflyWatch");
+    const latestProtocol = all.at(-1)?.protocolVersion ?? WATCH_LEGACY_PROTOCOL_VERSION;
+    const s = all.filter((x) => (x.protocolVersion ?? WATCH_LEGACY_PROTOCOL_VERSION) === latestProtocol);
     return [
       series(
         "medianRt",

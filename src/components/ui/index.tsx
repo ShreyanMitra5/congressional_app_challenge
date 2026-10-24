@@ -5,7 +5,7 @@
  * scene. Every tappable thing has a solid fill, a thick edge underneath and
  * presses down when touched. Nothing here glows unless it is the glow.
  */
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
 import { palette } from "@/lib/theme";
 
 export const ink = "#1A1530";
@@ -60,7 +60,13 @@ export function PrimaryButton({
       className="t-button btn-3d"
       style={{
         width,
-        height: 64,
+        maxWidth: "100%",
+        minWidth: 0,
+        padding: "12px 16px",
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
+        lineHeight: 1.2,
+        flexShrink: 0,
         borderRadius: 22,
         background: glowColor,
         color: ink,
@@ -68,6 +74,8 @@ export function PrimaryButton({
         opacity: disabled ? 0.5 : 1,
         ...pressable(edgeColor, 7),
         ...style,
+        height: "auto",
+        minHeight: style?.minHeight ?? style?.height ?? 64,
       }}
     >
       {children}
@@ -96,13 +104,21 @@ export function OutlineButton({
       className="t-button btn-3d"
       style={{
         width,
-        height: 60,
+        maxWidth: "100%",
+        minWidth: 0,
+        padding: "10px 16px",
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
+        lineHeight: 1.2,
+        flexShrink: 0,
         borderRadius: 22,
         background: palette.cream,
         color: ink,
         border: `3px solid ${tan}`,
         ...pressable(tanEdge, 6),
         ...style,
+        height: "auto",
+        minHeight: style?.minHeight ?? style?.height ?? 60,
       }}
     >
       {children}
@@ -129,7 +145,10 @@ export function TextButton({
       className="t-body-cream"
       style={{
         minHeight: 44,
-        padding: "0 16px",
+        maxWidth: "100%",
+        padding: "8px 16px",
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
         background: "transparent",
         border: "none",
         fontFamily: "var(--font-title)",
@@ -163,6 +182,7 @@ function Icon({ name, size = 24, color = ink }: { name: IconName; size?: number;
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     "aria-hidden": true,
+    focusable: false,
   };
   switch (name) {
     case "back":
@@ -261,6 +281,7 @@ export function IconButton({
       style={{
         width: size,
         height: size,
+        flexShrink: 0,
         borderRadius: 16,
         background: palette.cream,
         border: `3px solid ${tan}`,
@@ -312,6 +333,7 @@ export function BeadStrip({
   gap = 3,
   rows = 1,
   label = "Progress",
+  valueText,
 }: {
   beads: BeadState[];
   total: number;
@@ -321,6 +343,7 @@ export function BeadStrip({
   /** wrap the beads into this many rows (30 beads fit a phone far better as 2 x 15) */
   rows?: number;
   label?: string;
+  valueText?: string;
 }) {
   const lit = beads.filter((b) => b === "lit").length;
   const perRow = Math.ceil(total / rows);
@@ -331,6 +354,7 @@ export function BeadStrip({
       aria-valuemax={total}
       aria-valuenow={beads.length}
       aria-label={label}
+      aria-valuetext={valueText ?? `${beads.length} of ${total} turns finished; ${lit} catches`}
       data-lit={lit}
       data-done={beads.length}
       style={{
@@ -424,6 +448,7 @@ export function Card({
       style={{
         background: creamy ? palette.cream : navyCard,
         color: creamy ? ink : palette.cream,
+        ...(!creamy ? { "--cream": palette.cream, "--soft": palette.soft } as CSSProperties : {}),
         border: `3px solid ${creamy ? tan : palette.dullBorder}`,
         borderRadius: 24,
         boxShadow: `0 6px 0 ${creamy ? tanEdge : navyEdge}`,
@@ -442,20 +467,25 @@ export function Pips({
   total = 10,
   color = palette.glow,
   partial = 0,
+  label = "Progress",
+  valueText,
 }: {
   filled: number;
   total?: number;
   color?: string;
   /** 0..1 fill of the pip after the last filled one, so long runs visibly creep forward */
   partial?: number;
+  label?: string;
+  valueText?: string;
 }) {
   return (
     <div
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={total}
-      aria-valuenow={filled}
-      aria-label="Progress"
+      aria-valuenow={Math.min(total, Math.max(0, filled + partial))}
+      aria-label={label}
+      aria-valuetext={valueText}
       style={{
         display: "flex",
         gap: 4,
@@ -649,7 +679,14 @@ export function BigCircleButton({
       )}
       <button
         type="button"
+        aria-label={label}
         onPointerDown={onPointerDown}
+        onClick={(event) => {
+          // Native keyboard and assistive clicks have no pointer press of their own.
+          if (event.detail === 0 && onPointerDown) {
+            event.currentTarget.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true }));
+          }
+        }}
         onContextMenu={(e) => e.preventDefault()}
         className="t-button"
         style={{
@@ -677,11 +714,72 @@ export function BigCircleButton({
 /* ------------------------------------------------------------------ */
 
 export function Overlay({ children, title }: { children: ReactNode; title?: string }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const background: { element: HTMLElement; inert: boolean }[] = [];
+
+    // Keep the rest of the screen out of the tab order and accessibility tree.
+    let branch: HTMLElement = dialog;
+    while (branch.parentElement) {
+      for (const sibling of branch.parentElement.children) {
+        if (sibling !== branch && sibling instanceof HTMLElement) {
+          background.push({ element: sibling, inert: sibling.inert });
+          sibling.inert = true;
+        }
+      }
+      if (branch.parentElement === document.body) break;
+      branch = branch.parentElement;
+    }
+
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]',
+    )).filter((element) => element.tabIndex >= 0 && !element.closest("[inert]") && element.getClientRects().length > 0);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (event.shiftKey && (active === first || active === dialog || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof Node && !dialog.contains(event.target)) dialog.focus({ preventScroll: true });
+    };
+
+    dialog.focus({ preventScroll: true });
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
+      for (const item of background) item.element.inert = item.inert;
+      if (previousFocus?.isConnected && !previousFocus.closest("[inert]")) previousFocus.focus({ preventScroll: true });
+    };
+  }, []);
+
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
-      aria-label={title}
+      aria-labelledby={title ? titleId : undefined}
+      aria-label={title ? undefined : "Game menu"}
+      tabIndex={-1}
       className="fade-in"
       style={{
         position: "absolute",
@@ -690,17 +788,32 @@ export function Overlay({ children, title }: { children: ReactNode; title?: stri
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: "32px 20px",
+        overflow: "hidden",
+        outline: "none",
         zIndex: 50,
       }}
     >
       <Card
-        style={{ width: 326, display: "flex", flexDirection: "column", alignItems: "center", gap: 16, textAlign: "center" }}
+        style={{
+          width: 326,
+          maxWidth: "100%",
+          maxHeight: "100%",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          touchAction: "pan-y",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 20,
+          textAlign: "center",
+        }}
         padding="28px 22px 24px"
       >
         {title && (
-          <div className="t-title" style={{ color: ink, fontSize: "calc(30px * var(--text-scale))", textShadow: "none" }}>
+          <h2 id={titleId} className="t-title" style={{ margin: 0, flexShrink: 0, color: ink, fontSize: "calc(30px * var(--text-scale))", textShadow: "none" }}>
             {title}
-          </div>
+          </h2>
         )}
         {children}
       </Card>

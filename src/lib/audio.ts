@@ -11,12 +11,15 @@ let musicNodes: { gain: GainNode; oscillators: OscillatorNode[]; lfo: Oscillator
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  if (!ctx) {
+  if (!ctx || ctx.state === "closed") {
+    musicNodes = null;
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AC) return null;
     ctx = new AC();
   }
-  if (ctx.state === "suspended") void ctx.resume();
+  // WebKit also reports "interrupted" after calls or backgrounding. Retry on
+  // the next sound/user gesture, while allowing denied autoplay to stay quiet.
+  if (ctx.state !== "running") void ctx.resume().catch(() => {});
   return ctx;
 }
 

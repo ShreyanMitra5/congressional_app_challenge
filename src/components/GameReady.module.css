@@ -1,0 +1,109 @@
+.content {
+  position: relative;
+  padding: 28px 20px 32px;
+}
+
+.navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 30px;
+}
+
+.heading {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.title {
+  margin: 18px 0 12px;
+  font-size: calc(40px * var(--text-scale));
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.instructions {
+  margin: 0 auto;
+  max-width: 340px;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
+.illustration {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 320px;
+  min-height: 150px;
+  margin: 0 auto 30px;
+}
+
+.guide {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: end;
+  gap: 18px;
+  margin-bottom: 28px;
+}
+
+.companion {
+  display: grid;
+  place-items: center;
+}
+
+.companion > * {
+  max-width: 100%;
+  height: auto;
+}
+
+.encouragement {
+  min-width: 0;
+  padding-bottom: 12px;
+}
+
+.actions {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+@media (max-width: 350px) {
+  .guide {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .companion {
+    grid-row: 2;
+    justify-self: start;
+    width: 88px;
+    margin-left: 10px;
+  }
+
+  .encouragement > div > svg {
+    left: 30px !important;
+    bottom: -22px !important;
+    transform: rotate(-90deg);
+  }
+}
+
+:global(html[data-text-size="xlarge"]) .guide {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+:global(html[data-text-size="xlarge"]) .companion {
+  grid-row: 2;
+  justify-self: start;
+  width: 88px;
+  margin-left: 10px;
+}
+
+:global(html[data-text-size="xlarge"]) .encouragement > div > svg {
+  left: 30px !important;
+  bottom: -22px !important;
+  transform: rotate(-90deg);
+}
