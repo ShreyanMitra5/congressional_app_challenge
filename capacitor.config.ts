@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "com.wayglow.basecamp",
-  appName: "Wayglow",
+  appId: "com.braincompass.basecamp",
+  appName: "BrainCompass",
   webDir: "out",
   backgroundColor: "#14204A",
   loggingBehavior: "debug",

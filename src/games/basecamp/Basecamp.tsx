@@ -64,7 +64,7 @@ export function Basecamp() {
       <Scene variant="forest" reducedMotion={settings.reducedMotion} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} />
       <main className={styles.content}>
         <header className={styles.header}>
-          <span className={styles.wordmark}>wayglow<span className={styles.wordmarkDot}>✦</span></span>
+          <span className={styles.wordmark}>braincompass<span className={styles.wordmarkDot}>✦</span></span>
           <div className={styles.tools}>
             <IconButton icon={settings.sound ? "soundOn" : "soundOff"} label={settings.sound ? "Sound on" : "Sound off"} onClick={() => update({ sound: !settings.sound })} />
             <IconButton icon="settings" label="Settings" onClick={() => router.push("/settings")} />

@@ -23,14 +23,14 @@ interface KeyRow {
   key: CryptoKey;
 }
 
-class WayglowDB extends Dexie {
+class BrainCompassDB extends Dexie {
   sessions!: Table<EncryptedRow, string>;
   scores!: Table<EncryptedRow, string>;
   rewards!: Table<EncryptedRow, string>;
   keys!: Table<KeyRow, string>;
 
   constructor() {
-    // Storage name predates the Wayglow rename; changing it would orphan every saved session.
+    // Storage name predates the BrainCompass rename; changing it would orphan every saved session.
     super("neurotrace");
     this.version(1).stores({
       sessions: "id, game, at",
@@ -41,9 +41,9 @@ class WayglowDB extends Dexie {
   }
 }
 
-let db: WayglowDB | null = null;
+let db: BrainCompassDB | null = null;
 function getDb() {
-  if (!db) db = new WayglowDB();
+  if (!db) db = new BrainCompassDB();
   return db;
 }
 

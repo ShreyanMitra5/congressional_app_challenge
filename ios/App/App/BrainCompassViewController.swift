@@ -1,7 +1,7 @@
 import Capacitor
 import UIKit
 
-final class WayglowViewController: CAPBridgeViewController {
+final class BrainCompassViewController: CAPBridgeViewController {
     override func router() -> Router { StaticExportRouter() }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }

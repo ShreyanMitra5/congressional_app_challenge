@@ -1,4 +1,4 @@
-# Wayglow Basecamp
+# BrainCompass Basecamp
 
 Three calm, storybook-night games for children that measure cognition without ever feeling like a test. Menus and game introductions use responsive, scrollable layouts. Measured gameplay stays on a fixed 390 × 844 dp reference canvas that scales to fit the screen's safe area.
 
@@ -88,7 +88,7 @@ npm run ios:sync  # build the offline screens and copy them into Xcode
 npm run ios:open  # open ios/App/App.xcodeproj
 ```
 
-In Xcode, choose the **App** scheme and an iPhone/iPad simulator, then Run. For a physical device, choose your Apple development team under **Signing & Capabilities**, keep automatic signing enabled, connect your device, select it, and Run. The starter bundle identifier is `com.wayglow.basecamp`; change it in both `capacitor.config.ts` and the Xcode target if your team needs a different identifier. Personal signing settings are not stored in the repository.
+In Xcode, choose the **App** scheme and an iPhone/iPad simulator, then Run. For a physical device, choose your Apple development team under **Signing & Capabilities**, keep automatic signing enabled, connect your device, select it, and Run. The starter bundle identifier is `com.braincompass.basecamp`; change it in both `capacitor.config.ts` and the Xcode target if your team needs a different identifier. Personal signing settings are not stored in the repository.
 
 For a release archive, select **Any iOS Device** and use **Product → Archive**. An unsigned archive cannot be installed on a phone; distribution requires a matching signing profile. No App Store or TestFlight upload is performed by these scripts.
 
